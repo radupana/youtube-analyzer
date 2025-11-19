@@ -44,10 +44,10 @@ class TestLoadConfig:
             "channel": "TestChannel",
             "llm": {
                 "provider": "gemini",
-                "api_key": "test-key",
+                "api_key": "test-api-key-1234567890",
                 "model": "gemini-2.0-flash",
             },
-            "youtube_api_key": "yt-key",
+            "youtube_api_key": "youtube-api-key-1234567890",
             "extractor": "test_extractor",
             "output_file": "out.json",
             "max_videos": 10,
@@ -61,8 +61,8 @@ class TestLoadConfig:
             config = load_config(config_path)
             assert config.channel == "TestChannel"
             assert config.llm.provider == "gemini"
-            assert config.llm.api_key == "test-key"
-            assert config.youtube_api_key == "yt-key"
+            assert config.llm.api_key == "test-api-key-1234567890"
+            assert config.youtube_api_key == "youtube-api-key-1234567890"
             assert config.max_videos == 10
         finally:
             config_path.unlink()
@@ -72,8 +72,8 @@ class TestLoadConfig:
             load_config(Path("nonexistent.yaml"))
 
     def test_config_with_env_vars(self, monkeypatch):
-        monkeypatch.setenv("TEST_API_KEY", "secret-key")
-        monkeypatch.setenv("YT_KEY", "youtube-key")
+        monkeypatch.setenv("TEST_API_KEY", "secret-api-key-1234567890")
+        monkeypatch.setenv("YT_KEY", "youtube-api-key-1234567890")
 
         config_data = {
             "channel": "TestChannel",
@@ -92,16 +92,20 @@ class TestLoadConfig:
 
         try:
             config = load_config(config_path)
-            assert config.llm.api_key == "secret-key"
-            assert config.youtube_api_key == "youtube-key"
+            assert config.llm.api_key == "secret-api-key-1234567890"
+            assert config.youtube_api_key == "youtube-api-key-1234567890"
         finally:
             config_path.unlink()
 
     def test_invalid_llm_provider(self):
         config_data = {
             "channel": "Test",
-            "llm": {"provider": "invalid", "api_key": "key", "model": "model"},
-            "youtube_api_key": "key",
+            "llm": {
+                "provider": "invalid",
+                "api_key": "test-api-key-1234567890",
+                "model": "model",
+            },
+            "youtube_api_key": "youtube-api-key-1234567890",
             "extractor": "test",
         }
 
@@ -118,8 +122,12 @@ class TestLoadConfig:
     def test_max_videos_validation(self):
         config_data = {
             "channel": "Test",
-            "llm": {"provider": "gemini", "api_key": "key", "model": "model"},
-            "youtube_api_key": "key",
+            "llm": {
+                "provider": "gemini",
+                "api_key": "test-api-key-1234567890",
+                "model": "model",
+            },
+            "youtube_api_key": "youtube-api-key-1234567890",
             "extractor": "test",
             "max_videos": 1001,
         }
@@ -139,8 +147,12 @@ class TestValidateConfig:
     def test_valid_config(self):
         config = Config(
             channel="Test",
-            llm=LLMConfig(provider="gemini", api_key="key", model="model"),
-            youtube_api_key="yt-key",
+            llm=LLMConfig(
+                provider="gemini",
+                api_key="test-api-key-1234567890",
+                model="model",
+            ),
+            youtube_api_key="youtube-api-key-1234567890",
             extractor="test",
         )
         # Config validation happens at instantiation via Pydantic
@@ -150,11 +162,15 @@ class TestValidateConfig:
         # Pydantic validates at instantiation, so we need to bypass validation
         # by creating a dict first
         with pytest.raises(
-            ValidationError, match="String should have at least 1 character"
+            ValidationError, match="String should have at least 20 characters"
         ):
             Config(
                 channel="Test",
-                llm=LLMConfig(provider="gemini", api_key="key", model="model"),
+                llm=LLMConfig(
+                    provider="gemini",
+                    api_key="test-api-key-1234567890",
+                    model="model",
+                ),
                 youtube_api_key="",
                 extractor="test",
             )
