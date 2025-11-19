@@ -19,11 +19,7 @@ logger = logging.getLogger(__name__)
 
 def mask_sensitive(value: str | None) -> str:
     """Mask sensitive data like API keys for logging."""
-    if not value:
-        return "None"
-    if len(value) <= 8:
-        return "***"
-    return f"{value[:4]}...{value[-4:]}"
+    return "<SET>" if value else "<NOT SET>"
 
 
 def main() -> int:
@@ -61,19 +57,23 @@ Examples:
         logger.debug("Loading configuration from %s", args.config or "config.yaml")
         config = load_config(args.config)
 
-        # Apply command-line overrides
+        # Apply command-line overrides using model_copy to ensure validation
+        overrides = {}
         if args.channel:
-            config.channel = args.channel
+            overrides["channel"] = args.channel
             logger.debug("Channel overridden to: %s", args.channel)
         if args.max_videos:
-            config.max_videos = args.max_videos
+            overrides["max_videos"] = args.max_videos
             logger.debug("Max videos overridden to: %d", args.max_videos)
         if args.output:
-            config.output_file = args.output
+            overrides["output_file"] = args.output
             logger.debug("Output file overridden to: %s", args.output)
         if args.extractor:
-            config.extractor = args.extractor
+            overrides["extractor"] = args.extractor
             logger.debug("Extractor overridden to: %s", args.extractor)
+
+        if overrides:
+            config = config.model_copy(update=overrides)
 
         logger.info("Configuration loaded successfully")
         logger.debug(

@@ -6,6 +6,9 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field, ValidationError
 
+# Pre-compile regex pattern for environment variable substitution
+ENV_VAR_PATTERN = re.compile(r"\$\{([^}]+)}")
+
 
 class LLMConfig(BaseModel):
     provider: str = Field(..., pattern="^(gemini|openai|anthropic|custom)$")
@@ -22,9 +25,25 @@ class Config(BaseModel):
     max_videos: int = Field(default=50, ge=1, le=1000)
 
 
-def resolve_env_vars(value: Any) -> Any:
+def resolve_env_vars(value: Any, depth: int = 0, max_depth: int = 100) -> Any:
+    """
+    Recursively resolve environment variables in strings, dicts, and lists.
+
+    Args:
+        value: The value to process
+        depth: Current recursion depth (internal use)
+        max_depth: Maximum allowed recursion depth to prevent stack overflow
+
+    Raises:
+        ValueError: If environment variable is not set or max depth exceeded
+    """
+    if depth > max_depth:
+        raise ValueError(
+            f"Maximum recursion depth ({max_depth}) exceeded in config resolution. "
+            "This may indicate a malformed configuration file."
+        )
+
     if isinstance(value, str):
-        pattern = re.compile(r"\$\{([^}]+)}")
 
         def replacer(match: re.Match[str]) -> str:
             env_var = match.group(1)
@@ -33,15 +52,29 @@ def resolve_env_vars(value: Any) -> Any:
                 raise ValueError(f"Environment variable {env_var} is not set")
             return env_value
 
-        return pattern.sub(replacer, value)
+        return ENV_VAR_PATTERN.sub(replacer, value)
     elif isinstance(value, dict):
-        return {k: resolve_env_vars(v) for k, v in value.items()}
+        return {k: resolve_env_vars(v, depth + 1, max_depth) for k, v in value.items()}
     elif isinstance(value, list):
-        return [resolve_env_vars(item) for item in value]
+        return [resolve_env_vars(item, depth + 1, max_depth) for item in value]
     return value
 
 
 def load_config(config_path: Path | None = None) -> Config:
+    """
+    Load and validate configuration from a YAML file.
+
+    Args:
+        config_path: Path to config file (defaults to config.yaml)
+
+    Returns:
+        Validated Config object
+
+    Raises:
+        FileNotFoundError: If config file doesn't exist
+        PermissionError: If config file can't be read due to permissions
+        ValueError: If config is invalid or malformed
+    """
     if config_path is None:
         config_path = Path("config.yaml")
 
@@ -51,8 +84,31 @@ def load_config(config_path: Path | None = None) -> Config:
             "Please copy config.example.yaml to config.yaml and fill in your settings"
         )
 
-    with open(config_path, encoding="utf-8") as f:
-        raw_config = yaml.safe_load(f)
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            raw_config = yaml.safe_load(f)
+    except PermissionError as e:
+        raise PermissionError(
+            f"Permission denied reading config file: {config_path}\n"
+            "Please check file permissions."
+        ) from e
+    except UnicodeDecodeError as e:
+        raise ValueError(
+            f"Config file is not valid UTF-8: {config_path}\n"
+            "Please ensure the file is saved with UTF-8 encoding."
+        ) from e
+    except yaml.YAMLError as e:
+        raise ValueError(
+            f"Invalid YAML syntax in config file: {config_path}\n{e}"
+        ) from e
+    except OSError as e:
+        raise ValueError(f"Error reading config file: {config_path}\n{e}") from e
+
+    # Validate structure before processing
+    if not isinstance(raw_config, dict):
+        raise ValueError(
+            f"Config file must contain a YAML dictionary/object, got {type(raw_config).__name__}"
+        )
 
     resolved_config = resolve_env_vars(raw_config)
 
