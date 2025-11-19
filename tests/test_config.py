@@ -1,4 +1,3 @@
-import os
 import tempfile
 from pathlib import Path
 
@@ -13,23 +12,23 @@ class TestResolveEnvVars:
     def test_simple_string(self):
         assert resolve_env_vars("hello") == "hello"
 
-    def test_env_var_substitution(self):
-        os.environ["TEST_VAR"] = "test_value"
+    def test_env_var_substitution(self, monkeypatch):
+        monkeypatch.setenv("TEST_VAR", "test_value")
         assert resolve_env_vars("${TEST_VAR}") == "test_value"
 
     def test_missing_env_var_raises(self):
         with pytest.raises(ValueError, match="TEST_MISSING is not set"):
             resolve_env_vars("${TEST_MISSING}")
 
-    def test_dict_with_env_vars(self):
-        os.environ["KEY1"] = "value1"
-        os.environ["KEY2"] = "value2"
+    def test_dict_with_env_vars(self, monkeypatch):
+        monkeypatch.setenv("KEY1", "value1")
+        monkeypatch.setenv("KEY2", "value2")
         input_dict = {"a": "${KEY1}", "b": "${KEY2}", "c": "static"}
         expected = {"a": "value1", "b": "value2", "c": "static"}
         assert resolve_env_vars(input_dict) == expected
 
-    def test_nested_structure(self):
-        os.environ["NESTED"] = "nested_value"
+    def test_nested_structure(self, monkeypatch):
+        monkeypatch.setenv("NESTED", "nested_value")
         input_data = {
             "level1": {"level2": "${NESTED}", "list": ["${NESTED}", "static"]}
         }
@@ -72,9 +71,9 @@ class TestLoadConfig:
         with pytest.raises(FileNotFoundError, match="Config file not found"):
             load_config(Path("nonexistent.yaml"))
 
-    def test_config_with_env_vars(self):
-        os.environ["TEST_API_KEY"] = "secret-key"
-        os.environ["YT_KEY"] = "youtube-key"
+    def test_config_with_env_vars(self, monkeypatch):
+        monkeypatch.setenv("TEST_API_KEY", "secret-key")
+        monkeypatch.setenv("YT_KEY", "youtube-key")
 
         config_data = {
             "channel": "TestChannel",

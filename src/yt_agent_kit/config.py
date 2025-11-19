@@ -51,7 +51,7 @@ def load_config(config_path: Path | None = None) -> Config:
             "Please copy config.example.yaml to config.yaml and fill in your settings"
         )
 
-    with open(config_path) as f:
+    with open(config_path, encoding="utf-8") as f:
         raw_config = yaml.safe_load(f)
 
     resolved_config = resolve_env_vars(raw_config)

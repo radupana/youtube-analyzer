@@ -17,6 +17,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def mask_sensitive(value: str | None) -> str:
+    """Mask sensitive data like API keys for logging."""
+    if not value:
+        return "None"
+    if len(value) <= 8:
+        return "***"
+    return f"{value[:4]}...{value[-4:]}"
+
+
 def main() -> int:
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -68,10 +77,12 @@ Examples:
 
         logger.info("Configuration loaded successfully")
         logger.debug(
-            "Config: channel=%s, llm=%s/%s, max_videos=%d, output=%s",
+            "Config: channel=%s, llm=%s/%s (api_key=%s), youtube_key=%s, max_videos=%d, output=%s",
             config.channel,
             config.llm.provider,
             config.llm.model,
+            mask_sensitive(config.llm.api_key),
+            mask_sensitive(config.youtube_api_key),
             config.max_videos,
             config.output_file,
         )
