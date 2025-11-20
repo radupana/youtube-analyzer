@@ -87,9 +87,32 @@ Examples:
             config.output_file,
         )
 
-        # Configuration is valid and ready to use
-        # Implementation will be added when YouTube integration is ready
-        raise NotImplementedError("YouTube channel analysis not yet implemented.")
+        from .agent import run_conversation
+
+        logger.info("Starting conversational agent")
+        state = run_conversation(config)
+
+        if not state.channel:
+            raise ValueError("No channel was selected")
+
+        logger.info(
+            "Conversation completed: channel=%s, intent=%s, format=%s",
+            state.channel.title,
+            state.intent,
+            state.output_format,
+        )
+
+        print("\n" + "=" * 60)
+        print("Phase 2 Complete: Conversational Agent Foundation")
+        print("=" * 60)
+        print(f"Channel: {state.channel.title} ({state.channel.id})")
+        print(f"Intent: {state.intent}")
+        print(f"Output Format: {state.output_format}")
+        print(f"Videos to Process: {min(config.max_videos, state.channel.video_count)}")
+        print("=" * 60)
+        print("\nNext: Phase 3 will implement transcript extraction and LLM analysis.")
+
+        return 0
 
     except FileNotFoundError as e:
         logger.error("Configuration file not found: %s", e)
@@ -97,9 +120,12 @@ Examples:
         logger.info("1. Copy config.example.yaml to config.yaml")
         logger.info("2. Set your API keys")
         return 1
-    except (ValueError, NotImplementedError) as e:
+    except ValueError as e:
         logger.error(str(e))
         return 1
+    except KeyboardInterrupt:
+        logger.info("\nOperation cancelled by user")
+        return 130
     except Exception:
         logger.exception("Unexpected error occurred")
         return 1
