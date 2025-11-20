@@ -41,14 +41,12 @@ class TestResolveEnvVars:
 class TestLoadConfig:
     def test_load_valid_config(self):
         config_data = {
-            "channel": "TestChannel",
             "llm": {
                 "provider": "gemini",
                 "api_key": "test-api-key-1234567890",
                 "model": "gemini-2.0-flash",
             },
             "youtube_api_key": "youtube-api-key-1234567890",
-            "extractor": "test_extractor",
             "output_file": "out.json",
             "max_videos": 10,
         }
@@ -59,7 +57,6 @@ class TestLoadConfig:
 
         try:
             config = load_config(config_path)
-            assert config.channel == "TestChannel"
             assert config.llm.provider == "gemini"
             assert config.llm.api_key == "test-api-key-1234567890"
             assert config.youtube_api_key == "youtube-api-key-1234567890"
@@ -76,14 +73,12 @@ class TestLoadConfig:
         monkeypatch.setenv("YT_KEY", "youtube-api-key-1234567890")
 
         config_data = {
-            "channel": "TestChannel",
             "llm": {
                 "provider": "gemini",
                 "api_key": "${TEST_API_KEY}",
                 "model": "gemini-2.0-flash",
             },
             "youtube_api_key": "${YT_KEY}",
-            "extractor": "test",
         }
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -99,14 +94,12 @@ class TestLoadConfig:
 
     def test_invalid_llm_provider(self):
         config_data = {
-            "channel": "Test",
             "llm": {
                 "provider": "invalid",
                 "api_key": "test-api-key-1234567890",
                 "model": "model",
             },
             "youtube_api_key": "youtube-api-key-1234567890",
-            "extractor": "test",
         }
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -121,14 +114,12 @@ class TestLoadConfig:
 
     def test_max_videos_validation(self):
         config_data = {
-            "channel": "Test",
             "llm": {
                 "provider": "gemini",
                 "api_key": "test-api-key-1234567890",
                 "model": "model",
             },
             "youtube_api_key": "youtube-api-key-1234567890",
-            "extractor": "test",
             "max_videos": 1001,
         }
 
@@ -146,17 +137,15 @@ class TestLoadConfig:
 class TestValidateConfig:
     def test_valid_config(self):
         config = Config(
-            channel="Test",
             llm=LLMConfig(
                 provider="gemini",
                 api_key="test-api-key-1234567890",
                 model="model",
             ),
             youtube_api_key="youtube-api-key-1234567890",
-            extractor="test",
         )
         # Config validation happens at instantiation via Pydantic
-        assert config.channel == "Test"
+        assert config.llm.provider == "gemini"
 
     def test_missing_youtube_key(self):
         # Pydantic validates at instantiation, so we need to bypass validation
@@ -165,12 +154,10 @@ class TestValidateConfig:
             ValidationError, match="String should have at least 20 characters"
         ):
             Config(
-                channel="Test",
                 llm=LLMConfig(
                     provider="gemini",
                     api_key="test-api-key-1234567890",
                     model="model",
                 ),
                 youtube_api_key="",
-                extractor="test",
             )
