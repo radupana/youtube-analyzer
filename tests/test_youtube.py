@@ -275,10 +275,6 @@ class TestListVideos:
         assert result[1].id == "vid456"
         assert result[1].title == "Video 2"
 
-    def test_max_results_validation(self):
-        with pytest.raises(ValueError, match="max_results cannot exceed 100"):
-            list_videos("UCtest123456789012345678", "test-api-key", max_results=101)
-
     def test_pagination(self):
         mock_youtube = Mock()
         mock_search = Mock()

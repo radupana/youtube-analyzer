@@ -4,13 +4,12 @@ import hashlib
 import re
 from dataclasses import dataclass
 
-from googleapiclient.discovery import build  # type: ignore[import-untyped]
+from googleapiclient.discovery import build  # type: ignore[import-not-found]
 
 from .cache import get_from_cache, save_to_cache
 
 # YouTube API pagination limits
 MAX_RESULTS_PER_PAGE = 50
-ABSOLUTE_MAX_VIDEOS = 100
 
 
 @dataclass
@@ -109,21 +108,16 @@ def list_videos(
     channel_id: str, api_key: str, max_results: int = MAX_RESULTS_PER_PAGE
 ) -> list[VideoInfo]:
     """
-    List videos from channel with pagination.
+    List videos from channel sorted by view count (most viewed first).
 
     Args:
         channel_id: YouTube channel ID
         api_key: YouTube Data API key
-        max_results: Maximum number of videos to return (max 100)
+        max_results: Maximum number of videos to return
 
     Returns:
-        List of VideoInfo objects
-
-    Raises:
-        ValueError: If max_results > ABSOLUTE_MAX_VIDEOS
+        List of VideoInfo objects sorted by view count descending
     """
-    if max_results > ABSOLUTE_MAX_VIDEOS:
-        raise ValueError(f"max_results cannot exceed {ABSOLUTE_MAX_VIDEOS}")
 
     cache_key = f"videos_{channel_id}_{max_results}"
     cached = get_from_cache(cache_key)
@@ -136,7 +130,7 @@ def list_videos(
         part="id",
         channelId=channel_id,
         type="video",
-        order="date",
+        order="viewCount",  # Sort by most viewed first
         maxResults=min(max_results, MAX_RESULTS_PER_PAGE),
     )
 
@@ -156,25 +150,29 @@ def list_videos(
 
         search_request = youtube.search().list_next(search_request, search_response)
 
+    # Fetch video details in batches of 50 (API limit)
     if video_ids:
-        video_request = youtube.videos().list(
-            part="snippet,contentDetails", id=",".join(video_ids)
-        )
-        video_response = video_request.execute()
-
-        for item in video_response.get("items", []):
-            snippet = item["snippet"]
-            content_details = item["contentDetails"]
-
-            videos.append(
-                VideoInfo(
-                    id=item["id"],
-                    title=snippet["title"],
-                    description=snippet["description"],
-                    published_at=snippet["publishedAt"],
-                    duration=content_details["duration"],
-                )
+        BATCH_SIZE = 50
+        for i in range(0, len(video_ids), BATCH_SIZE):
+            batch = video_ids[i : i + BATCH_SIZE]
+            video_request = youtube.videos().list(
+                part="snippet,contentDetails", id=",".join(batch)
             )
+            video_response = video_request.execute()
+
+            for item in video_response.get("items", []):
+                snippet = item["snippet"]
+                content_details = item["contentDetails"]
+
+                videos.append(
+                    VideoInfo(
+                        id=item["id"],
+                        title=snippet["title"],
+                        description=snippet["description"],
+                        published_at=snippet["publishedAt"],
+                        duration=content_details["duration"],
+                    )
+                )
 
     video_dicts = [v.__dict__ for v in videos]
     save_to_cache(cache_key, video_dicts)

@@ -21,4 +21,4 @@ youtube_api_key: "${YOUTUBE_API_KEY}"  # Can be same as GEMINI_API_KEY for Googl
 
 # Default settings (optional)
 output_file: "results.json"  # Where to save analysis results
-max_videos: 100  # Safety limit on videos to process
+max_videos: 200  # Safety limit on videos to process
