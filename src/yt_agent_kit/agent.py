@@ -5,6 +5,10 @@ from dataclasses import dataclass
 from .config import Config
 from .youtube import ChannelInfo, find_channel_id
 
+# Input validation limits
+MAX_INPUT_LENGTH = 1000
+DESCRIPTION_PREVIEW_LENGTH = 150
+
 
 @dataclass
 class ConversationState:
@@ -33,6 +37,8 @@ def ask_channel(config: Config) -> ChannelInfo:
 
     if not query:
         raise ValueError("Channel cannot be empty")
+    if len(query) > MAX_INPUT_LENGTH:
+        raise ValueError(f"Input too long (max {MAX_INPUT_LENGTH} characters)")
 
     print(f"\nSearching for '{query}'...")
 
@@ -46,8 +52,8 @@ def ask_channel(config: Config) -> ChannelInfo:
         print(f"  Handle: {channel.custom_url}")
     if channel.description:
         description_preview = (
-            channel.description[:150] + "..."
-            if len(channel.description) > 150
+            channel.description[:DESCRIPTION_PREVIEW_LENGTH] + "..."
+            if len(channel.description) > DESCRIPTION_PREVIEW_LENGTH
             else channel.description
         )
         print(f"  Description: {description_preview}")
@@ -70,6 +76,8 @@ def ask_intent() -> str:
 
     if not intent:
         raise ValueError("Intent cannot be empty")
+    if len(intent) > MAX_INPUT_LENGTH:
+        raise ValueError(f"Input too long (max {MAX_INPUT_LENGTH} characters)")
 
     return intent
 

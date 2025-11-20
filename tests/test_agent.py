@@ -72,6 +72,12 @@ class TestAskChannel:
                 with pytest.raises(ValueError, match="Channel not found"):
                     ask_channel(config)
 
+    def test_channel_input_too_long(self, config):
+        long_input = "a" * 1001  # Exceeds MAX_INPUT_LENGTH (1000)
+        with patch("builtins.input", return_value=long_input):
+            with pytest.raises(ValueError, match="Input too long"):
+                ask_channel(config)
+
 
 class TestAskIntent:
     def test_valid_intent(self, capsys):
@@ -90,6 +96,12 @@ class TestAskIntent:
     def test_whitespace_only_intent(self):
         with patch("builtins.input", return_value="   "):
             with pytest.raises(ValueError, match="Intent cannot be empty"):
+                ask_intent()
+
+    def test_intent_input_too_long(self):
+        long_input = "a" * 1001  # Exceeds MAX_INPUT_LENGTH (1000)
+        with patch("builtins.input", return_value=long_input):
+            with pytest.raises(ValueError, match="Input too long"):
                 ask_intent()
 
 

@@ -1,30 +1,32 @@
 """Simple file-based caching utilities."""
 
+import hashlib
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+# Cache configuration
+DEFAULT_CACHE_MAX_AGE_HOURS = 24
+
 
 def cache_path(key: str) -> Path:
-    """Generate cache file path from key."""
+    """
+    Generate cache file path from key using SHA256 hash.
+
+    Using hash-based approach prevents filename collisions and avoids
+    issues with special characters across different filesystems.
+    """
     cache_dir = Path(".cache")
     cache_dir.mkdir(exist_ok=True)
-    safe_key = (
-        key.replace("/", "_")
-        .replace(":", "_")
-        .replace("*", "_")
-        .replace("?", "_")
-        .replace('"', "_")
-        .replace("<", "_")
-        .replace(">", "_")
-        .replace("|", "_")
-        .replace("\\", "_")
-    )
+    # Use SHA256 to avoid collisions and handle all special characters
+    safe_key = hashlib.sha256(key.encode()).hexdigest()
     return cache_dir / f"{safe_key}.json"
 
 
-def get_from_cache(cache_key: str, max_age_hours: int = 24) -> Any | None:
+def get_from_cache(
+    cache_key: str, max_age_hours: int = DEFAULT_CACHE_MAX_AGE_HOURS
+) -> Any | None:
     """
     Load from .cache/ if exists and not expired.
 

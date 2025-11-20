@@ -8,6 +8,10 @@ from googleapiclient.discovery import build  # type: ignore[import-untyped]
 
 from .cache import get_from_cache, save_to_cache
 
+# YouTube API pagination limits
+MAX_RESULTS_PER_PAGE = 50
+ABSOLUTE_MAX_VIDEOS = 100
+
 
 @dataclass
 class ChannelInfo:
@@ -52,7 +56,7 @@ def find_channel_id(query: str, api_key: str) -> ChannelInfo:
     Raises:
         ValueError: If channel not found
     """
-    cache_key = f"channel_{hashlib.md5(query.encode()).hexdigest()}"
+    cache_key = f"channel_{hashlib.sha256(query.encode()).hexdigest()}"
     cached = get_from_cache(cache_key)
     if cached:
         return ChannelInfo(**cached)
@@ -102,7 +106,7 @@ def find_channel_id(query: str, api_key: str) -> ChannelInfo:
 
 
 def list_videos(
-    channel_id: str, api_key: str, max_results: int = 50
+    channel_id: str, api_key: str, max_results: int = MAX_RESULTS_PER_PAGE
 ) -> list[VideoInfo]:
     """
     List videos from channel with pagination.
@@ -116,10 +120,10 @@ def list_videos(
         List of VideoInfo objects
 
     Raises:
-        ValueError: If max_results > 100
+        ValueError: If max_results > ABSOLUTE_MAX_VIDEOS
     """
-    if max_results > 100:
-        raise ValueError("max_results cannot exceed 100")
+    if max_results > ABSOLUTE_MAX_VIDEOS:
+        raise ValueError(f"max_results cannot exceed {ABSOLUTE_MAX_VIDEOS}")
 
     cache_key = f"videos_{channel_id}_{max_results}"
     cached = get_from_cache(cache_key)
@@ -133,7 +137,7 @@ def list_videos(
         channelId=channel_id,
         type="video",
         order="date",
-        maxResults=min(max_results, 50),
+        maxResults=min(max_results, MAX_RESULTS_PER_PAGE),
     )
 
     videos: list[VideoInfo] = []

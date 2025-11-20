@@ -11,12 +11,36 @@ class TestCachePath:
         assert path.parent.exists()
         assert path.parent.name == ".cache"
 
-    def test_sanitizes_key(self, tmp_path, monkeypatch):
+    def test_uses_hash_for_key(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        path = cache_path("key/with:special")
-        assert "/" not in path.name
-        assert ":" not in path.name
-        assert path.name == "key_with_special.json"
+        path = cache_path("test_key")
+        # Should be a SHA256 hash (64 hex chars) + .json extension
+        assert len(path.stem) == 64
+        assert path.suffix == ".json"
+        assert path.name.endswith(".json")
+
+    def test_same_key_produces_same_hash(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        path1 = cache_path("identical_key")
+        path2 = cache_path("identical_key")
+        assert path1 == path2
+
+    def test_different_keys_produce_different_hashes(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        path1 = cache_path("key1")
+        path2 = cache_path("key2")
+        assert path1 != path2
+
+    def test_handles_special_characters_without_collision(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        # These used to collide with sanitization approach
+        path1 = cache_path("channel/test")
+        path2 = cache_path("channel:test")
+        path3 = cache_path("channel_test")
+        # All should be different now with hashing
+        assert path1 != path2
+        assert path2 != path3
+        assert path1 != path3
 
 
 class TestSaveToCache:

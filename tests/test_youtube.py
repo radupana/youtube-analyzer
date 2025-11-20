@@ -192,6 +192,33 @@ class TestFindChannelId:
         assert result1.title == result2.title
         mock_request.execute.assert_called_once()
 
+    def test_channel_with_missing_statistics(self):
+        """Test channel with missing subscriber count (private stats)."""
+        mock_youtube = Mock()
+        mock_channels = Mock()
+        mock_youtube.channels.return_value = mock_channels
+        mock_request = Mock()
+        mock_channels.list.return_value = mock_request
+        mock_request.execute.return_value = {
+            "items": [
+                {
+                    "id": "UCprivate123456789012345",
+                    "snippet": {
+                        "title": "Private Stats Channel",
+                        "description": "Stats hidden",
+                    },
+                    "statistics": {},  # No subscriber/video counts
+                }
+            ]
+        }
+
+        with patch("yt_agent_kit.youtube.build", return_value=mock_youtube):
+            result = find_channel_id("UCprivate123456789012345", "test-api-key")
+
+        assert result.id == "UCprivate123456789012345"
+        assert result.subscriber_count == 0
+        assert result.video_count == 0
+
 
 class TestListVideos:
     def test_list_videos_basic(self):
@@ -341,3 +368,19 @@ class TestListVideos:
         assert len(result2) == 1
         assert result1[0].id == result2[0].id
         mock_search_request.execute.assert_called_once()
+
+    def test_channel_with_zero_videos(self):
+        """Test channel with no videos uploaded."""
+        mock_youtube = Mock()
+        mock_search = Mock()
+        mock_youtube.search.return_value = mock_search
+
+        mock_search_request = Mock()
+        mock_search.list.return_value = mock_search_request
+        mock_search.list_next.return_value = None
+        mock_search_request.execute.return_value = {"items": []}  # No videos
+
+        with patch("yt_agent_kit.youtube.build", return_value=mock_youtube):
+            result = list_videos("UCempty12345678901234567", "test-api-key")
+
+        assert len(result) == 0
