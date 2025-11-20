@@ -1,0 +1,18 @@
+# YouTube channel to analyze
+channel: "Ben Johnson"  # or @BenLJohnson1996 or full URL
+
+# LLM provider settings
+llm:
+  provider: "gemini"  # Options: gemini, openai, anthropic
+  api_key: "${GEMINI_API_KEY}"  # or set directly: "your-key-here"
+  model: "gemini-2.0-flash"  # Cost-effective option
+
+# YouTube API
+youtube_api_key: "${YOUTUBE_API_KEY}"  # Can be same as GEMINI_API_KEY for Google
+
+# What to extract from transcripts
+extractor: "strength_training"  # Which extraction template to use
+
+# Output settings
+output_file: "results.json"
+max_videos: 50  # Limit videos to process

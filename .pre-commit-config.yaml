@@ -1,0 +1,53 @@
+# Pre-commit hooks for automated formatting and linting
+# Run manually: pre-commit run --all-files
+# Install hooks: pre-commit install
+
+repos:
+  # Format Python code with Black
+  - repo: https://github.com/psf/black
+    rev: 25.11.0
+    hooks:
+      - id: black
+        language_version: python3.13
+
+  # Sort imports with isort
+  - repo: https://github.com/PyCQA/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        args: ["--profile", "black"]
+
+  # Lint with Ruff (fast Python linter)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.5
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+
+  # Type check with MyPy
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.18.2
+    hooks:
+      - id: mypy
+        additional_dependencies:
+          - pydantic>=2.0.0
+          - types-requests
+          - types-PyYAML
+        args: ["--strict", "--python-version=3.13"]
+        exclude: "tests/"
+
+  # Standard pre-commit hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ["--maxkb=1000"]
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: debug-statements  # Check for print() and pdb
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
