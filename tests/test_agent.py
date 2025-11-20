@@ -15,14 +15,12 @@ from yt_agent_kit.config import Config, LLMConfig
 @pytest.fixture
 def config():
     return Config(
-        channel="test",
         llm=LLMConfig(
             provider="gemini",
             api_key="test-api-key-1234567890",
             model="gemini-2.0-flash",
         ),
         youtube_api_key="youtube-api-key-1234567890",
-        extractor="test",
     )
 
 

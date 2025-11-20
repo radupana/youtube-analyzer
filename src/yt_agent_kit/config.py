@@ -17,10 +17,8 @@ class LLMConfig(BaseModel):
 
 
 class Config(BaseModel):
-    channel: str = Field(..., min_length=1)
     llm: LLMConfig
     youtube_api_key: str = Field(..., min_length=20)
-    extractor: str = Field(..., min_length=1)
     output_file: str = Field(default="results.json")
     max_videos: int = Field(default=50, ge=1, le=1000)
 
