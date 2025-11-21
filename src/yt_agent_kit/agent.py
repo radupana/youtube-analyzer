@@ -1,9 +1,9 @@
 """Conversational agent for YouTube channel analysis."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .config import Config
-from .youtube import ChannelInfo, find_channel_id
+from .youtube import ChannelInfo, VideoInfo, find_channel_id
 
 # Input validation limits
 MAX_INPUT_LENGTH = 1000
@@ -17,6 +17,9 @@ class ConversationState:
     channel: ChannelInfo | None = None
     intent: str | None = None
     output_format: str = "human"
+    max_videos: int = 50
+    videos: list[VideoInfo] = field(default_factory=list)
+    transcripts: dict[str, str] = field(default_factory=dict)
 
 
 def ask_channel(config: Config) -> ChannelInfo:
@@ -100,6 +103,43 @@ def ask_output_format() -> str:
     format_map = {"1": "human", "2": "json", "3": "markdown"}
 
     return format_map.get(choice, "human")
+
+
+def ask_video_count(channel: ChannelInfo, max_videos: int) -> int:
+    """
+    Ask user how many videos to process.
+
+    Args:
+        channel: Channel information
+        max_videos: Maximum videos from config
+
+    Returns:
+        Number of videos to process
+    """
+    available = channel.video_count
+    default = min(50, available)
+    maximum = min(max_videos, available)
+
+    while True:
+        print("\nHow many videos should I analyze?")
+        print(f"  Available: {available:,} videos")
+        print(f"  Maximum: {maximum:,} videos")
+        print()
+
+        choice = input(f"Videos [{default}]: ").strip() or str(default)
+
+        try:
+            count = int(choice)
+            if count < 1:
+                print("Error: Must be at least 1 video")
+                continue
+            if count > maximum:
+                print(f"Error: Cannot exceed {maximum:,} videos")
+                continue
+            return count
+        except ValueError:
+            print("Error: Please enter a valid number")
+            continue
 
 
 def run_conversation(config: Config) -> ConversationState:

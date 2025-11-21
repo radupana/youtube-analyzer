@@ -74,7 +74,9 @@ Examples:
             config.output_file,
         )
 
-        from .agent import run_conversation
+        from .agent import ask_video_count, run_conversation
+        from .transcript import get_transcripts_batch
+        from .youtube import list_videos
 
         logger.info("Starting conversational agent")
         state = run_conversation(config)
@@ -89,15 +91,45 @@ Examples:
             state.output_format,
         )
 
+        state.max_videos = ask_video_count(state.channel, config.max_videos)
+        logger.info("User selected %d videos to process", state.max_videos)
+
+        print("\nFetching video list from YouTube...")
+        state.videos = list_videos(
+            state.channel.id, config.youtube_api_key, state.max_videos
+        )
+        logger.info("Retrieved %d videos from channel", len(state.videos))
+
+        print(f"Fetching transcripts for {len(state.videos)} videos...")
+
+        def show_progress(current: int, total: int, video_id: str) -> None:
+            """Display progress to user."""
+            video = next((v for v in state.videos if v.id == video_id), None)
+            title = video.title if video else video_id
+            percentage = int((current / total) * 100)
+            print(f"Progress: {current}/{total} ({percentage}%) - Fetching: '{title}'")
+
+        video_ids = [v.id for v in state.videos]
+        state.transcripts = get_transcripts_batch(
+            video_ids, progress_callback=show_progress
+        )
+
+        skipped = len(state.videos) - len(state.transcripts)
+        print(
+            f"\n✅ Successfully fetched {len(state.transcripts)}/{len(state.videos)} transcripts"
+            + (f" ({skipped} skipped)" if skipped > 0 else "")
+        )
+
         print("\n" + "=" * 60)
-        print("Phase 2 Complete: Conversational Agent Foundation")
+        print("Phase 3 Complete: Transcript Acquisition")
         print("=" * 60)
         print(f"Channel: {state.channel.title} ({state.channel.id})")
         print(f"Intent: {state.intent}")
         print(f"Output Format: {state.output_format}")
-        print(f"Videos to Process: {min(config.max_videos, state.channel.video_count)}")
+        print(f"Videos Fetched: {len(state.videos)}")
+        print(f"Transcripts Retrieved: {len(state.transcripts)}")
         print("=" * 60)
-        print("\nNext: Phase 3 will implement transcript extraction and LLM analysis.")
+        print("\nNext: Phase 4 will implement LLM extraction and intent mapping.")
 
         return 0
 

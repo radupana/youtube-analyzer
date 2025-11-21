@@ -7,6 +7,7 @@ from yt_agent_kit.agent import (
     ask_channel,
     ask_intent,
     ask_output_format,
+    ask_video_count,
     run_conversation,
 )
 from yt_agent_kit.config import Config, LLMConfig
@@ -132,6 +133,84 @@ class TestAskOutputFormat:
         assert result == "human"
 
 
+class TestAskVideoCount:
+    def test_default_count(self):
+        mock_channel = Mock()
+        mock_channel.video_count = 100
+
+        with patch("builtins.input", return_value=""):
+            result = ask_video_count(mock_channel, max_videos=100)
+        assert result == 50
+
+    def test_custom_count(self):
+        mock_channel = Mock()
+        mock_channel.video_count = 100
+
+        with patch("builtins.input", return_value="25"):
+            result = ask_video_count(mock_channel, max_videos=100)
+        assert result == 25
+
+    def test_respects_channel_limit(self):
+        mock_channel = Mock()
+        mock_channel.video_count = 30
+
+        with patch("builtins.input", return_value=""):
+            result = ask_video_count(mock_channel, max_videos=100)
+        assert result == 30
+
+    def test_respects_config_limit(self):
+        mock_channel = Mock()
+        mock_channel.video_count = 200
+
+        with patch("builtins.input", return_value=""):
+            result = ask_video_count(mock_channel, max_videos=75)
+        assert result == 50
+
+    def test_retries_count_exceeding_maximum(self, capsys):
+        mock_channel = Mock()
+        mock_channel.video_count = 50
+
+        with patch("builtins.input", side_effect=["100", "25"]):
+            result = ask_video_count(mock_channel, max_videos=100)
+
+        assert result == 25
+        captured = capsys.readouterr()
+        assert "Cannot exceed 50" in captured.out
+
+    def test_retries_zero_count(self, capsys):
+        mock_channel = Mock()
+        mock_channel.video_count = 100
+
+        with patch("builtins.input", side_effect=["0", "10"]):
+            result = ask_video_count(mock_channel, max_videos=100)
+
+        assert result == 10
+        captured = capsys.readouterr()
+        assert "Must be at least 1" in captured.out
+
+    def test_retries_negative_count(self, capsys):
+        mock_channel = Mock()
+        mock_channel.video_count = 100
+
+        with patch("builtins.input", side_effect=["-5", "10"]):
+            result = ask_video_count(mock_channel, max_videos=100)
+
+        assert result == 10
+        captured = capsys.readouterr()
+        assert "Must be at least 1" in captured.out
+
+    def test_retries_non_numeric_input(self, capsys):
+        mock_channel = Mock()
+        mock_channel.video_count = 100
+
+        with patch("builtins.input", side_effect=["abc", "10"]):
+            result = ask_video_count(mock_channel, max_videos=100)
+
+        assert result == 10
+        captured = capsys.readouterr()
+        assert "valid number" in captured.out
+
+
 class TestRunConversation:
     def test_complete_conversation(self, config, capsys):
         mock_channel = Mock()
@@ -182,12 +261,24 @@ class TestConversationState:
         assert state.channel is None
         assert state.intent is None
         assert state.output_format == "human"
+        assert state.max_videos == 50
+        assert state.videos == []
+        assert state.transcripts == {}
 
     def test_with_values(self):
         mock_channel = Mock()
+        mock_video = Mock()
         state = ConversationState(
-            channel=mock_channel, intent="test", output_format="json"
+            channel=mock_channel,
+            intent="test",
+            output_format="json",
+            max_videos=100,
+            videos=[mock_video],
+            transcripts={"vid1": "transcript"},
         )
         assert state.channel == mock_channel
         assert state.intent == "test"
         assert state.output_format == "json"
+        assert state.max_videos == 100
+        assert state.videos == [mock_video]
+        assert state.transcripts == {"vid1": "transcript"}
