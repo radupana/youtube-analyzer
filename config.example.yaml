@@ -22,3 +22,13 @@ youtube_api_key: "${YOUTUBE_API_KEY}"  # Can be same as GEMINI_API_KEY for Googl
 # Default settings (optional)
 output_file: "results.json"  # Where to save analysis results
 max_videos: 200  # Safety limit on videos to process
+
+# Embedding settings (optional - all run locally, no API costs)
+embeddings:
+  model: "all-MiniLM-L6-v2"  # Local model (~80MB download on first run)
+  chunk_size: 1200  # Characters per chunk
+  chunk_overlap: 200  # Overlap between chunks
+
+# Search settings (optional)
+search:
+  top_k: 8  # Number of chunks to retrieve per query
