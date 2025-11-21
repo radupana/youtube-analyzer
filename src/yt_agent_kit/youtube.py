@@ -17,7 +17,7 @@ VIDEO_URL_PATTERN = re.compile(
     r"(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/)([a-zA-Z0-9_-]{11})"
 )
 PLAYLIST_URL_PATTERN = re.compile(r"youtube\.com/playlist\?list=([a-zA-Z0-9_-]+)")
-PLAYLIST_ID_PATTERN = re.compile(r"^PL[a-zA-Z0-9_-]+$")
+PLAYLIST_ID_PATTERN = re.compile(r"^(PL|UU|LL|WL|FL|RD)[a-zA-Z0-9_-]+$")
 CHANNEL_URL_PATTERN = re.compile(r"youtube\.com/channel/([\w-]+)")
 CHANNEL_ID_PATTERN = re.compile(r"^UC[\w-]{22}$")
 HANDLE_PATTERN = re.compile(r"^@[\w.-]+$")

@@ -78,11 +78,14 @@ Examples:
         from .chat import ChatSession
         from .embeddings import build_index, get_index_stats
         from .transcript import get_transcripts_batch
-        from .youtube import InputType, list_videos
+        from .youtube import InputType, get_video_info, list_videos
 
         logger.info("Starting conversational agent")
 
         input_type, collection_id, title, video_ids = ask_source(config)
+
+        # video_titles maps video_id -> title for index building
+        video_titles: dict[str, str] = {}
 
         if input_type == InputType.CHANNEL:
             print("\nHow many videos should I analyze?")
@@ -95,12 +98,21 @@ Examples:
             channel_id = collection_id.replace("channel_", "")
             videos = list_videos(channel_id, config.youtube_api_key, max_videos)
             video_ids = [v.id for v in videos]
+            video_titles = {v.id: v.title for v in videos}
             print(f"Found {len(video_ids)} videos")
+        else:
+            # For videos/playlists, fetch titles for each video
+            for vid in video_ids:
+                try:
+                    info = get_video_info(vid, config.youtube_api_key)
+                    video_titles[vid] = info.title
+                except ValueError:
+                    video_titles[vid] = vid  # Fallback to ID if fetch fails
 
         print(f"\nFetching transcripts for {len(video_ids)} videos...")
 
         def show_progress(current: int, total: int, video_id: str) -> None:
-            percentage = int((current / total) * 100)
+            percentage = int((current / total) * 100) if total > 0 else 0
             print(f"Progress: {current}/{total} ({percentage}%) - {video_id}")
 
         transcripts = get_transcripts_batch(video_ids, progress_callback=show_progress)
@@ -115,7 +127,9 @@ Examples:
             raise ValueError("No transcripts available for the selected content")
 
         print("\nBuilding search index...")
-        transcripts_for_index = {vid: (vid, text) for vid, text in transcripts.items()}
+        transcripts_for_index = {
+            vid: (video_titles.get(vid, vid), text) for vid, text in transcripts.items()
+        }
         added = build_index(collection_id, transcripts_for_index)
         stats = get_index_stats(collection_id)
         logger.info(

@@ -427,6 +427,36 @@ class TestDetectInputType:
         assert input_type == InputType.PLAYLIST
         assert pid == "PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf"
 
+    def test_playlist_id_uploads(self):
+        """UU prefix is channel uploads playlist."""
+        input_type, pid = detect_input_type("UUabcdefghijklmnopqrstuv")
+        assert input_type == InputType.PLAYLIST
+        assert pid == "UUabcdefghijklmnopqrstuv"
+
+    def test_playlist_id_liked(self):
+        """LL prefix is liked videos playlist."""
+        input_type, pid = detect_input_type("LLabcdefghijklmnopqrstuv")
+        assert input_type == InputType.PLAYLIST
+        assert pid == "LLabcdefghijklmnopqrstuv"
+
+    def test_playlist_id_watch_later(self):
+        """WL prefix is watch later playlist."""
+        input_type, pid = detect_input_type("WLabcdefghijklmnopqrstuv")
+        assert input_type == InputType.PLAYLIST
+        assert pid == "WLabcdefghijklmnopqrstuv"
+
+    def test_playlist_id_favorites(self):
+        """FL prefix is favorites playlist."""
+        input_type, pid = detect_input_type("FLabcdefghijklmnopqrstuv")
+        assert input_type == InputType.PLAYLIST
+        assert pid == "FLabcdefghijklmnopqrstuv"
+
+    def test_playlist_id_radio(self):
+        """RD prefix is radio/mix playlist."""
+        input_type, pid = detect_input_type("RDabcdefghijklmnopqrstuv")
+        assert input_type == InputType.PLAYLIST
+        assert pid == "RDabcdefghijklmnopqrstuv"
+
     def test_channel_url(self):
         input_type, cid = detect_input_type(
             "https://youtube.com/channel/UCabcdefghijklmnopqrstuv"

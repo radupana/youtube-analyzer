@@ -2,7 +2,7 @@ from unittest.mock import Mock, patch
 
 from yt_agent_kit.__main__ import main, mask_sensitive
 from yt_agent_kit.config import Config, LLMConfig
-from yt_agent_kit.youtube import InputType
+from yt_agent_kit.youtube import InputType, VideoInfo
 
 
 class TestMaskSensitive:
@@ -49,6 +49,14 @@ class TestMain:
             youtube_api_key="youtube-api-key-1234567890",
         )
 
+        mock_video_info = VideoInfo(
+            id="abc123",
+            title="Test Video Title",
+            description="",
+            published_at="2024-01-01T00:00:00Z",
+            duration="PT10M",
+        )
+
         with patch("yt_agent_kit.__main__.load_config", return_value=config):
             with patch(
                 "yt_agent_kit.agent.ask_source",
@@ -60,21 +68,27 @@ class TestMain:
                 ),
             ):
                 with patch(
-                    "yt_agent_kit.transcript.get_transcripts_batch",
-                    return_value={"abc123": "transcript text"},
+                    "yt_agent_kit.youtube.get_video_info",
+                    return_value=mock_video_info,
                 ):
-                    with patch("yt_agent_kit.embeddings.build_index", return_value=1):
+                    with patch(
+                        "yt_agent_kit.transcript.get_transcripts_batch",
+                        return_value={"abc123": "transcript text"},
+                    ):
                         with patch(
-                            "yt_agent_kit.embeddings.get_index_stats",
-                            return_value={
-                                "total_chunks": 5,
-                                "total_videos": 1,
-                                "index_size_mb": 0.1,
-                            },
+                            "yt_agent_kit.embeddings.build_index", return_value=1
                         ):
-                            with patch("builtins.input", side_effect=["quit"]):
-                                with patch("sys.argv", ["yt_agent_kit"]):
-                                    exit_code = main()
+                            with patch(
+                                "yt_agent_kit.embeddings.get_index_stats",
+                                return_value={
+                                    "total_chunks": 5,
+                                    "total_videos": 1,
+                                    "index_size_mb": 0.1,
+                                },
+                            ):
+                                with patch("builtins.input", side_effect=["quit"]):
+                                    with patch("sys.argv", ["yt_agent_kit"]):
+                                        exit_code = main()
 
         assert exit_code == 0
 
@@ -137,6 +151,14 @@ class TestMain:
             youtube_api_key="youtube-api-key-1234567890",
         )
 
+        mock_video_info = VideoInfo(
+            id="abc123",
+            title="Test Video Title",
+            description="",
+            published_at="2024-01-01T00:00:00Z",
+            duration="PT10M",
+        )
+
         with patch("yt_agent_kit.__main__.load_config", return_value=config):
             with patch(
                 "yt_agent_kit.agent.ask_source",
@@ -148,11 +170,15 @@ class TestMain:
                 ),
             ):
                 with patch(
-                    "yt_agent_kit.transcript.get_transcripts_batch",
-                    return_value={},
+                    "yt_agent_kit.youtube.get_video_info",
+                    return_value=mock_video_info,
                 ):
-                    with patch("sys.argv", ["yt_agent_kit"]):
-                        exit_code = main()
+                    with patch(
+                        "yt_agent_kit.transcript.get_transcripts_batch",
+                        return_value={},
+                    ):
+                        with patch("sys.argv", ["yt_agent_kit"]):
+                            exit_code = main()
 
         assert exit_code == 1
 
