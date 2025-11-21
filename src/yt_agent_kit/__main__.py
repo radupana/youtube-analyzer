@@ -100,7 +100,7 @@ Examples:
             except ValueError:
                 max_videos = 50
 
-            channel_id = collection_id.replace("channel_", "")
+            channel_id = collection_id.removeprefix("channel_")
             videos = list_videos(channel_id, config.youtube_api_key, max_videos)
             video_ids = [v.id for v in videos]
             video_titles = {v.id: v.title for v in videos}

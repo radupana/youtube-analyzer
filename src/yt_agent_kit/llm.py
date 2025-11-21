@@ -20,6 +20,11 @@ class Message:
 
 
 def call_gemini(messages: list[Message], config: LLMConfig) -> str:
+    """Call Gemini API with the given messages.
+
+    Note: Only the last system message is used as the system instruction.
+    Multiple system messages will result in only the final one being applied.
+    """
     client = genai.Client(api_key=config.api_key)
 
     system_instruction: str | None = None
@@ -27,7 +32,7 @@ def call_gemini(messages: list[Message], config: LLMConfig) -> str:
 
     for msg in messages:
         if msg.role == "system":
-            system_instruction = msg.content
+            system_instruction = msg.content  # Last system message wins
         else:
             contents.append(
                 types.Content(
@@ -55,6 +60,12 @@ def call_gemini(messages: list[Message], config: LLMConfig) -> str:
 
 
 def call_llm(messages: list[Message], config: LLMConfig) -> str:
+    """Route LLM calls to the appropriate provider.
+
+    Currently supported: gemini
+    Future: openai, anthropic (see config.py for provider options)
+    """
     if config.provider == "gemini":
         return call_gemini(messages, config)
+    # TODO: Add openai and anthropic providers when needed
     raise LLMError(f"Unsupported provider: {config.provider}")
