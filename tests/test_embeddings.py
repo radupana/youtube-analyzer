@@ -276,24 +276,30 @@ class TestIndexPersistence:
         assert results[0].video_id == "vid1"
 
 
-class TestChannelIdValidation:
-    def test_valid_channel_ids(self, temp_index_dir):
-        valid_ids = ["UCabcdef123", "channel_1", "my-channel", "ABC123"]
-        for channel_id in valid_ids:
-            build_index(channel_id, {})
+class TestCollectionIdValidation:
+    def test_valid_collection_ids(self, temp_index_dir):
+        valid_ids = [
+            "UCabcdef123",
+            "channel_UCabcdef123",
+            "video_dQw4w9WgXcQ",
+            "playlist_PLtest123",
+            "my-channel",
+        ]
+        for collection_id in valid_ids:
+            build_index(collection_id, {})
 
     def test_path_traversal_rejected(self, temp_index_dir):
-        with pytest.raises(ValueError, match="Invalid channel_id"):
+        with pytest.raises(ValueError, match="Invalid collection_id"):
             build_index("../malicious", {})
 
     def test_slash_rejected(self, temp_index_dir):
-        with pytest.raises(ValueError, match="Invalid channel_id"):
+        with pytest.raises(ValueError, match="Invalid collection_id"):
             build_index("foo/bar", {})
 
-    def test_empty_channel_id_rejected(self, temp_index_dir):
-        with pytest.raises(ValueError, match="Invalid channel_id"):
+    def test_empty_collection_id_rejected(self, temp_index_dir):
+        with pytest.raises(ValueError, match="Invalid collection_id"):
             build_index("", {})
 
     def test_special_chars_rejected(self, temp_index_dir):
-        with pytest.raises(ValueError, match="Invalid channel_id"):
-            build_index("channel@test", {})
+        with pytest.raises(ValueError, match="Invalid collection_id"):
+            build_index("collection@test", {})

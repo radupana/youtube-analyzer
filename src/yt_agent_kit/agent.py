@@ -3,35 +3,71 @@
 from dataclasses import dataclass, field
 
 from .config import Config
-from .youtube import ChannelInfo, VideoInfo, find_channel_id
+from .youtube import (
+    ChannelInfo,
+    InputType,
+    VideoInfo,
+    detect_input_type,
+    find_channel_id,
+    get_playlist_info,
+    get_playlist_video_ids,
+    get_video_info,
+)
 
-# Input validation limits
 MAX_INPUT_LENGTH = 1000
 DESCRIPTION_PREVIEW_LENGTH = 150
 
 
 @dataclass
 class ConversationState:
-    """State of the conversational agent."""
-
+    input_type: InputType | None = None
+    collection_id: str | None = None
+    title: str | None = None
     channel: ChannelInfo | None = None
     intent: str | None = None
     output_format: str = "human"
     max_videos: int = 50
+    video_ids: list[str] = field(default_factory=list)
     videos: list[VideoInfo] = field(default_factory=list)
     transcripts: dict[str, str] = field(default_factory=dict)
 
 
+def ask_source(config: Config) -> tuple[InputType, str, str, list[str]]:
+    print("\nHi! What YouTube content should I analyze?")
+    print("(video URL, playlist URL, channel name, @handle, or channel URL)")
+    print()
+
+    query = input("Source: ").strip()
+
+    if not query:
+        raise ValueError("Input cannot be empty")
+    if len(query) > MAX_INPUT_LENGTH:
+        raise ValueError(f"Input too long (max {MAX_INPUT_LENGTH} characters)")
+
+    input_type, extracted = detect_input_type(query)
+
+    if input_type == InputType.VIDEO:
+        video = get_video_info(extracted, config.youtube_api_key)
+        print(f"\nFound video: {video.title}")
+        return input_type, f"video_{extracted}", video.title, [extracted]
+
+    elif input_type == InputType.PLAYLIST:
+        playlist = get_playlist_info(extracted, config.youtube_api_key)
+        video_ids = get_playlist_video_ids(
+            extracted, config.youtube_api_key, max_results=config.max_videos
+        )
+        print(f"\nFound playlist: {playlist['title']} ({len(video_ids)} videos)")
+        return input_type, f"playlist_{extracted}", playlist["title"], video_ids
+
+    else:
+        channel = find_channel_id(extracted, config.youtube_api_key)
+        print(f"\nFound channel: {channel.title}")
+        print(f"  Subscribers: {channel.subscriber_count:,}")
+        print(f"  Total Videos: {channel.video_count:,}")
+        return input_type, f"channel_{channel.id}", channel.title, []
+
+
 def ask_channel(config: Config) -> ChannelInfo:
-    """
-    Ask user for YouTube channel with conversational flow.
-
-    Returns:
-        ChannelInfo with channel metadata
-
-    Raises:
-        ValueError: If channel not found or invalid
-    """
     print("\nHi! What YouTube channel are we analyzing today?")
     print("(You can provide a channel name, @handle, URL, or channel ID)")
     print()
@@ -103,6 +139,31 @@ def ask_output_format() -> str:
     format_map = {"1": "human", "2": "json", "3": "markdown"}
 
     return format_map.get(choice, "human")
+
+
+def parse_video_count(user_input: str, max_allowed: int, default: int = 50) -> int:
+    """
+    Parse and validate video count from user input.
+
+    Args:
+        user_input: Raw user input string
+        max_allowed: Maximum videos allowed
+        default: Default value if input is empty or invalid
+
+    Returns:
+        Validated video count (at least 1, at most max_allowed)
+    """
+    if not user_input.strip():
+        return min(default, max_allowed)
+
+    try:
+        count = int(user_input)
+        if count < 1:
+            print("Must be at least 1, using default")
+            return min(default, max_allowed)
+        return min(count, max_allowed)
+    except ValueError:
+        return min(default, max_allowed)
 
 
 def ask_video_count(channel: ChannelInfo, max_videos: int) -> int:

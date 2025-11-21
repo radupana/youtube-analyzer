@@ -7,10 +7,13 @@ from yt_agent_kit.agent import (
     ask_channel,
     ask_intent,
     ask_output_format,
+    ask_source,
     ask_video_count,
+    parse_video_count,
     run_conversation,
 )
 from yt_agent_kit.config import Config, LLMConfig
+from yt_agent_kit.youtube import InputType, VideoInfo
 
 
 @pytest.fixture
@@ -133,6 +136,48 @@ class TestAskOutputFormat:
         assert result == "human"
 
 
+class TestParseVideoCount:
+    def test_empty_input_returns_default(self):
+        result = parse_video_count("", max_allowed=100)
+        assert result == 50
+
+    def test_whitespace_input_returns_default(self):
+        result = parse_video_count("   ", max_allowed=100)
+        assert result == 50
+
+    def test_valid_number(self):
+        result = parse_video_count("25", max_allowed=100)
+        assert result == 25
+
+    def test_caps_at_max_allowed(self):
+        result = parse_video_count("200", max_allowed=100)
+        assert result == 100
+
+    def test_negative_returns_default(self, capsys):
+        result = parse_video_count("-5", max_allowed=100)
+        assert result == 50
+        captured = capsys.readouterr()
+        assert "Must be at least 1" in captured.out
+
+    def test_zero_returns_default(self, capsys):
+        result = parse_video_count("0", max_allowed=100)
+        assert result == 50
+        captured = capsys.readouterr()
+        assert "Must be at least 1" in captured.out
+
+    def test_invalid_string_returns_default(self):
+        result = parse_video_count("abc", max_allowed=100)
+        assert result == 50
+
+    def test_custom_default(self):
+        result = parse_video_count("", max_allowed=100, default=25)
+        assert result == 25
+
+    def test_default_capped_at_max(self):
+        result = parse_video_count("", max_allowed=30, default=50)
+        assert result == 30
+
+
 class TestAskVideoCount:
     def test_default_count(self):
         mock_channel = Mock()
@@ -253,6 +298,100 @@ class TestRunConversation:
         assert state.channel.title == "Default Test"
         assert state.intent == "default intent"
         assert state.output_format == "human"
+
+
+class TestAskSource:
+    def test_video_url_input(self, config, capsys):
+        mock_video = VideoInfo(
+            id="abc123",
+            title="Test Video Title",
+            description="",
+            published_at="2024-01-01T00:00:00Z",
+            duration="PT10M",
+        )
+
+        with patch("builtins.input", return_value="https://youtube.com/watch?v=abc123"):
+            with patch(
+                "yt_agent_kit.agent.detect_input_type",
+                return_value=(InputType.VIDEO, "abc123"),
+            ):
+                with patch(
+                    "yt_agent_kit.agent.get_video_info", return_value=mock_video
+                ):
+                    input_type, collection_id, title, video_ids = ask_source(config)
+
+        assert input_type == InputType.VIDEO
+        assert collection_id == "video_abc123"
+        assert title == "Test Video Title"
+        assert video_ids == ["abc123"]
+
+        captured = capsys.readouterr()
+        assert "Found video: Test Video Title" in captured.out
+
+    def test_playlist_url_input(self, config, capsys):
+        mock_playlist = {"title": "Test Playlist", "id": "PLtest123"}
+
+        with patch(
+            "builtins.input",
+            return_value="https://youtube.com/playlist?list=PLtest123",
+        ):
+            with patch(
+                "yt_agent_kit.agent.detect_input_type",
+                return_value=(InputType.PLAYLIST, "PLtest123"),
+            ):
+                with patch(
+                    "yt_agent_kit.agent.get_playlist_info", return_value=mock_playlist
+                ):
+                    with patch(
+                        "yt_agent_kit.agent.get_playlist_video_ids",
+                        return_value=["vid1", "vid2", "vid3"],
+                    ):
+                        input_type, collection_id, title, video_ids = ask_source(config)
+
+        assert input_type == InputType.PLAYLIST
+        assert collection_id == "playlist_PLtest123"
+        assert title == "Test Playlist"
+        assert video_ids == ["vid1", "vid2", "vid3"]
+
+        captured = capsys.readouterr()
+        assert "Found playlist: Test Playlist (3 videos)" in captured.out
+
+    def test_channel_handle_input(self, config, capsys):
+        mock_channel = Mock()
+        mock_channel.id = "UC123abc"
+        mock_channel.title = "Test Channel"
+        mock_channel.subscriber_count = 1000000
+        mock_channel.video_count = 500
+
+        with patch("builtins.input", return_value="@testchannel"):
+            with patch(
+                "yt_agent_kit.agent.detect_input_type",
+                return_value=(InputType.CHANNEL, "@testchannel"),
+            ):
+                with patch(
+                    "yt_agent_kit.agent.find_channel_id", return_value=mock_channel
+                ):
+                    input_type, collection_id, title, video_ids = ask_source(config)
+
+        assert input_type == InputType.CHANNEL
+        assert collection_id == "channel_UC123abc"
+        assert title == "Test Channel"
+        assert video_ids == []
+
+        captured = capsys.readouterr()
+        assert "Found channel: Test Channel" in captured.out
+        assert "Subscribers: 1,000,000" in captured.out
+
+    def test_empty_input_raises_error(self, config):
+        with patch("builtins.input", return_value=""):
+            with pytest.raises(ValueError, match="Input cannot be empty"):
+                ask_source(config)
+
+    def test_input_too_long_raises_error(self, config):
+        long_input = "a" * 1001
+        with patch("builtins.input", return_value=long_input):
+            with pytest.raises(ValueError, match="Input too long"):
+                ask_source(config)
 
 
 class TestConversationState:

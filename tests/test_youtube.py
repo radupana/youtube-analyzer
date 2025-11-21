@@ -2,7 +2,25 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from yt_agent_kit.youtube import find_channel_id, list_videos
+from yt_agent_kit import youtube
+from yt_agent_kit.youtube import (
+    InputType,
+    detect_input_type,
+    find_channel_id,
+    get_playlist_info,
+    get_playlist_video_ids,
+    get_video_info,
+    get_videos_batch,
+    list_videos,
+)
+
+
+@pytest.fixture(autouse=True)
+def clear_youtube_client_cache():
+    """Clear the YouTube client cache before each test to ensure clean mocking."""
+    youtube._youtube_clients.clear()
+    yield
+    youtube._youtube_clients.clear()
 
 
 class TestFindChannelId:
@@ -371,7 +389,6 @@ class TestListVideos:
         mock_search_request.execute.assert_called_once()
 
     def test_channel_with_zero_videos(self):
-        """Test channel with no videos uploaded."""
         mock_youtube = Mock()
         mock_search = Mock()
         mock_youtube.search.return_value = mock_search
@@ -379,9 +396,354 @@ class TestListVideos:
         mock_search_request = Mock()
         mock_search.list.return_value = mock_search_request
         mock_search.list_next.return_value = None
-        mock_search_request.execute.return_value = {"items": []}  # No videos
+        mock_search_request.execute.return_value = {"items": []}
 
         with patch("yt_agent_kit.youtube.build", return_value=mock_youtube):
             result = list_videos("UCempty12345678901234567", "test-api-key")
 
         assert len(result) == 0
+
+
+class TestDetectInputType:
+    def test_video_url_watch(self):
+        input_type, vid = detect_input_type("https://youtube.com/watch?v=dQw4w9WgXcQ")
+        assert input_type == InputType.VIDEO
+        assert vid == "dQw4w9WgXcQ"
+
+    def test_video_url_short(self):
+        input_type, vid = detect_input_type("https://youtu.be/dQw4w9WgXcQ")
+        assert input_type == InputType.VIDEO
+        assert vid == "dQw4w9WgXcQ"
+
+    def test_video_url_embed(self):
+        input_type, vid = detect_input_type("https://youtube.com/embed/dQw4w9WgXcQ")
+        assert input_type == InputType.VIDEO
+        assert vid == "dQw4w9WgXcQ"
+
+    def test_video_id_direct(self):
+        input_type, vid = detect_input_type("dQw4w9WgXcQ")
+        assert input_type == InputType.VIDEO
+        assert vid == "dQw4w9WgXcQ"
+
+    def test_playlist_url(self):
+        input_type, pid = detect_input_type(
+            "https://youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf"
+        )
+        assert input_type == InputType.PLAYLIST
+        assert pid == "PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf"
+
+    def test_playlist_id_direct(self):
+        input_type, pid = detect_input_type("PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf")
+        assert input_type == InputType.PLAYLIST
+        assert pid == "PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf"
+
+    def test_playlist_id_uploads(self):
+        """UU prefix is channel uploads playlist."""
+        input_type, pid = detect_input_type("UUabcdefghijklmnopqrstuv")
+        assert input_type == InputType.PLAYLIST
+        assert pid == "UUabcdefghijklmnopqrstuv"
+
+    def test_playlist_id_liked(self):
+        """LL prefix is liked videos playlist."""
+        input_type, pid = detect_input_type("LLabcdefghijklmnopqrstuv")
+        assert input_type == InputType.PLAYLIST
+        assert pid == "LLabcdefghijklmnopqrstuv"
+
+    def test_playlist_id_watch_later(self):
+        """WL prefix is watch later playlist."""
+        input_type, pid = detect_input_type("WLabcdefghijklmnopqrstuv")
+        assert input_type == InputType.PLAYLIST
+        assert pid == "WLabcdefghijklmnopqrstuv"
+
+    def test_playlist_id_favorites(self):
+        """FL prefix is favorites playlist."""
+        input_type, pid = detect_input_type("FLabcdefghijklmnopqrstuv")
+        assert input_type == InputType.PLAYLIST
+        assert pid == "FLabcdefghijklmnopqrstuv"
+
+    def test_playlist_id_radio(self):
+        """RD prefix is radio/mix playlist."""
+        input_type, pid = detect_input_type("RDabcdefghijklmnopqrstuv")
+        assert input_type == InputType.PLAYLIST
+        assert pid == "RDabcdefghijklmnopqrstuv"
+
+    def test_channel_url(self):
+        input_type, cid = detect_input_type(
+            "https://youtube.com/channel/UCabcdefghijklmnopqrstuv"
+        )
+        assert input_type == InputType.CHANNEL
+        assert cid == "UCabcdefghijklmnopqrstuv"
+
+    def test_channel_id_direct(self):
+        input_type, cid = detect_input_type("UCabcdefghijklmnopqrstuv")
+        assert input_type == InputType.CHANNEL
+        assert cid == "UCabcdefghijklmnopqrstuv"
+
+    def test_handle_url(self):
+        input_type, handle = detect_input_type("https://youtube.com/@JeffNippard")
+        assert input_type == InputType.CHANNEL
+        assert handle == "@JeffNippard"
+
+    def test_handle_direct(self):
+        input_type, handle = detect_input_type("@JeffNippard")
+        assert input_type == InputType.CHANNEL
+        assert handle == "@JeffNippard"
+
+    def test_channel_name_fallback(self):
+        input_type, name = detect_input_type("Jeff Nippard")
+        assert input_type == InputType.CHANNEL
+        assert name == "Jeff Nippard"
+
+    def test_strips_whitespace(self):
+        input_type, vid = detect_input_type("  dQw4w9WgXcQ  ")
+        assert input_type == InputType.VIDEO
+        assert vid == "dQw4w9WgXcQ"
+
+
+class TestGetPlaylistVideoIds:
+    def test_fetches_video_ids(self):
+        mock_youtube = Mock()
+        mock_playlist_items = Mock()
+        mock_youtube.playlistItems.return_value = mock_playlist_items
+
+        mock_request = Mock()
+        mock_playlist_items.list.return_value = mock_request
+        mock_playlist_items.list_next.return_value = None
+        mock_request.execute.return_value = {
+            "items": [
+                {"contentDetails": {"videoId": "vid1"}},
+                {"contentDetails": {"videoId": "vid2"}},
+                {"contentDetails": {"videoId": "vid3"}},
+            ]
+        }
+
+        with patch("yt_agent_kit.youtube.build", return_value=mock_youtube):
+            result = get_playlist_video_ids("PLtest123", "test-api-key")
+
+        assert result == ["vid1", "vid2", "vid3"]
+
+    def test_respects_max_results(self):
+        mock_youtube = Mock()
+        mock_playlist_items = Mock()
+        mock_youtube.playlistItems.return_value = mock_playlist_items
+
+        mock_request = Mock()
+        mock_playlist_items.list.return_value = mock_request
+        mock_playlist_items.list_next.return_value = None
+        mock_request.execute.return_value = {
+            "items": [{"contentDetails": {"videoId": f"vid{i}"}} for i in range(10)]
+        }
+
+        with patch("yt_agent_kit.youtube.build", return_value=mock_youtube):
+            result = get_playlist_video_ids("PLtest123", "test-api-key", max_results=5)
+
+        assert len(result) == 5
+
+    def test_caching(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+
+        mock_youtube = Mock()
+        mock_playlist_items = Mock()
+        mock_youtube.playlistItems.return_value = mock_playlist_items
+
+        mock_request = Mock()
+        mock_playlist_items.list.return_value = mock_request
+        mock_playlist_items.list_next.return_value = None
+        mock_request.execute.return_value = {
+            "items": [{"contentDetails": {"videoId": "vid1"}}]
+        }
+
+        with patch("yt_agent_kit.youtube.build", return_value=mock_youtube):
+            result1 = get_playlist_video_ids(
+                "PLcache123", "test-api-key", max_results=10
+            )
+            result2 = get_playlist_video_ids(
+                "PLcache123", "test-api-key", max_results=10
+            )
+
+        assert result1 == result2
+        mock_request.execute.assert_called_once()
+
+
+class TestGetPlaylistInfo:
+    def test_fetches_playlist_info(self):
+        mock_youtube = Mock()
+        mock_playlists = Mock()
+        mock_youtube.playlists.return_value = mock_playlists
+
+        mock_request = Mock()
+        mock_playlists.list.return_value = mock_request
+        mock_request.execute.return_value = {
+            "items": [
+                {
+                    "id": "PLtest123",
+                    "snippet": {
+                        "title": "Test Playlist",
+                        "description": "A test playlist",
+                        "channelTitle": "Test Channel",
+                    },
+                }
+            ]
+        }
+
+        with patch("yt_agent_kit.youtube.build", return_value=mock_youtube):
+            result = get_playlist_info("PLtest123", "test-api-key")
+
+        assert result["id"] == "PLtest123"
+        assert result["title"] == "Test Playlist"
+        assert result["description"] == "A test playlist"
+        assert result["channel_title"] == "Test Channel"
+
+    def test_playlist_not_found(self):
+        mock_youtube = Mock()
+        mock_playlists = Mock()
+        mock_youtube.playlists.return_value = mock_playlists
+
+        mock_request = Mock()
+        mock_playlists.list.return_value = mock_request
+        mock_request.execute.return_value = {"items": []}
+
+        with patch("yt_agent_kit.youtube.build", return_value=mock_youtube):
+            with pytest.raises(ValueError, match="Playlist not found"):
+                get_playlist_info("PLnonexistent", "test-api-key")
+
+
+class TestGetVideoInfo:
+    def test_fetches_video_info(self):
+        mock_youtube = Mock()
+        mock_videos = Mock()
+        mock_youtube.videos.return_value = mock_videos
+
+        mock_request = Mock()
+        mock_videos.list.return_value = mock_request
+        mock_request.execute.return_value = {
+            "items": [
+                {
+                    "id": "vid123",
+                    "snippet": {
+                        "title": "Test Video",
+                        "description": "A test video",
+                        "publishedAt": "2024-01-01T00:00:00Z",
+                    },
+                    "contentDetails": {"duration": "PT10M30S"},
+                }
+            ]
+        }
+
+        with patch("yt_agent_kit.youtube.build", return_value=mock_youtube):
+            result = get_video_info("vid123", "test-api-key")
+
+        assert result.id == "vid123"
+        assert result.title == "Test Video"
+        assert result.description == "A test video"
+        assert result.duration == "PT10M30S"
+
+    def test_video_not_found(self):
+        mock_youtube = Mock()
+        mock_videos = Mock()
+        mock_youtube.videos.return_value = mock_videos
+
+        mock_request = Mock()
+        mock_videos.list.return_value = mock_request
+        mock_request.execute.return_value = {"items": []}
+
+        with patch("yt_agent_kit.youtube.build", return_value=mock_youtube):
+            with pytest.raises(ValueError, match="Video not found"):
+                get_video_info("nonexistent", "test-api-key")
+
+
+class TestGetVideosBatch:
+    def test_empty_list_returns_empty_dict(self):
+        result = get_videos_batch([], "test-api-key")
+        assert result == {}
+
+    def test_fetches_multiple_videos(self):
+        mock_youtube = Mock()
+        mock_videos = Mock()
+        mock_youtube.videos.return_value = mock_videos
+
+        mock_request = Mock()
+        mock_videos.list.return_value = mock_request
+        mock_request.execute.return_value = {
+            "items": [
+                {
+                    "id": "vid1",
+                    "snippet": {
+                        "title": "Video 1",
+                        "description": "Desc 1",
+                        "publishedAt": "2024-01-01T00:00:00Z",
+                    },
+                    "contentDetails": {"duration": "PT5M"},
+                },
+                {
+                    "id": "vid2",
+                    "snippet": {
+                        "title": "Video 2",
+                        "description": "Desc 2",
+                        "publishedAt": "2024-01-02T00:00:00Z",
+                    },
+                    "contentDetails": {"duration": "PT10M"},
+                },
+            ]
+        }
+
+        with patch("yt_agent_kit.youtube.build", return_value=mock_youtube):
+            with patch("yt_agent_kit.youtube.get_from_cache", return_value=None):
+                with patch("yt_agent_kit.youtube.save_to_cache"):
+                    result = get_videos_batch(["vid1", "vid2"], "test-api-key")
+
+        assert len(result) == 2
+        assert result["vid1"].title == "Video 1"
+        assert result["vid2"].title == "Video 2"
+
+    def test_uses_cache_for_existing_videos(self):
+        cached_video = {
+            "id": "cached_vid",
+            "title": "Cached Video",
+            "description": "From cache",
+            "published_at": "2024-01-01T00:00:00Z",
+            "duration": "PT3M",
+        }
+
+        def mock_cache(key):
+            if key == "video_info_cached_vid":
+                return cached_video
+            return None
+
+        with patch("yt_agent_kit.youtube.get_from_cache", side_effect=mock_cache):
+            result = get_videos_batch(["cached_vid"], "test-api-key")
+
+        assert len(result) == 1
+        assert result["cached_vid"].title == "Cached Video"
+
+    def test_handles_missing_videos(self):
+        """Videos not returned by API are omitted from result."""
+        mock_youtube = Mock()
+        mock_videos = Mock()
+        mock_youtube.videos.return_value = mock_videos
+
+        mock_request = Mock()
+        mock_videos.list.return_value = mock_request
+        # API only returns vid1, not vid2
+        mock_request.execute.return_value = {
+            "items": [
+                {
+                    "id": "vid1",
+                    "snippet": {
+                        "title": "Video 1",
+                        "description": "",
+                        "publishedAt": "2024-01-01T00:00:00Z",
+                    },
+                    "contentDetails": {"duration": "PT5M"},
+                }
+            ]
+        }
+
+        with patch("yt_agent_kit.youtube.build", return_value=mock_youtube):
+            with patch("yt_agent_kit.youtube.get_from_cache", return_value=None):
+                with patch("yt_agent_kit.youtube.save_to_cache"):
+                    result = get_videos_batch(["vid1", "vid2"], "test-api-key")
+
+        assert len(result) == 1
+        assert "vid1" in result
+        assert "vid2" not in result

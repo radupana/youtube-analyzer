@@ -15,7 +15,7 @@ DEFAULT_CHUNK_SIZE = 1200
 DEFAULT_CHUNK_OVERLAP = 200
 BATCH_SIZE = 1000
 
-CHANNEL_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+COLLECTION_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
 @dataclass
@@ -31,9 +31,9 @@ def _get_model(model_name: str) -> SentenceTransformer:
     return SentenceTransformer(model_name)
 
 
-def _validate_channel_id(channel_id: str) -> None:
-    if not channel_id or not CHANNEL_ID_PATTERN.match(channel_id):
-        raise ValueError(f"Invalid channel_id: {channel_id}")
+def _validate_collection_id(collection_id: str) -> None:
+    if not collection_id or not COLLECTION_ID_PATTERN.match(collection_id):
+        raise ValueError(f"Invalid collection_id: {collection_id}")
 
 
 def chunk_transcript(
@@ -77,30 +77,30 @@ def chunk_transcript(
     return chunks
 
 
-def _get_collection_path(channel_id: str) -> Path:
-    _validate_channel_id(channel_id)
-    return INDEX_DIR / channel_id
+def _get_collection_path(collection_id: str) -> Path:
+    _validate_collection_id(collection_id)
+    return INDEX_DIR / collection_id
 
 
-def _get_client(channel_id: str) -> Any:
-    path = _get_collection_path(channel_id)
+def _get_client(collection_id: str) -> Any:
+    path = _get_collection_path(collection_id)
     path.mkdir(parents=True, exist_ok=True)
     return chromadb.PersistentClient(path=str(path))
 
 
 def build_index(
-    channel_id: str,
+    collection_id: str,
     transcripts: dict[str, tuple[str, str]],
     model_name: str = DEFAULT_MODEL,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
 ) -> int:
-    _validate_channel_id(channel_id)
+    _validate_collection_id(collection_id)
 
     if not transcripts:
         return 0
 
-    client = _get_client(channel_id)
+    client = _get_client(collection_id)
     collection = client.get_or_create_collection(name="transcripts")
 
     existing_ids = set()
@@ -146,16 +146,16 @@ def build_index(
 
 
 def search(
-    channel_id: str,
+    collection_id: str,
     query: str,
     k: int = 8,
     model_name: str = DEFAULT_MODEL,
 ) -> list[Chunk]:
-    path = _get_collection_path(channel_id)
+    path = _get_collection_path(collection_id)
     if not path.exists():
         return []
 
-    client = _get_client(channel_id)
+    client = _get_client(collection_id)
 
     try:
         collection = client.get_collection(name="transcripts")
@@ -188,12 +188,12 @@ def search(
     return chunks
 
 
-def get_index_stats(channel_id: str) -> dict[str, int | float]:
-    path = _get_collection_path(channel_id)
+def get_index_stats(collection_id: str) -> dict[str, int | float]:
+    path = _get_collection_path(collection_id)
     if not path.exists():
         return {"total_chunks": 0, "total_videos": 0, "index_size_mb": 0.0}
 
-    client = _get_client(channel_id)
+    client = _get_client(collection_id)
 
     try:
         collection = client.get_collection(name="transcripts")
@@ -221,20 +221,15 @@ def get_index_stats(channel_id: str) -> dict[str, int | float]:
     }
 
 
-def delete_videos(channel_id: str, video_ids: set[str]) -> int:
-    """Delete videos from the index that are no longer in the transcript set.
-
-    Returns:
-        Number of videos actually deleted from the index.
-    """
+def delete_videos(collection_id: str, video_ids: set[str]) -> int:
     if not video_ids:
         return 0
 
-    path = _get_collection_path(channel_id)
+    path = _get_collection_path(collection_id)
     if not path.exists():
         return 0
 
-    client = _get_client(channel_id)
+    client = _get_client(collection_id)
 
     try:
         collection = client.get_collection(name="transcripts")
@@ -267,13 +262,12 @@ def delete_videos(channel_id: str, video_ids: set[str]) -> int:
     return len(deleted_video_ids)
 
 
-def _get_indexed_video_ids(channel_id: str) -> set[str]:
-    """Get all video IDs currently in the index using batch processing."""
-    path = _get_collection_path(channel_id)
+def _get_indexed_video_ids(collection_id: str) -> set[str]:
+    path = _get_collection_path(collection_id)
     if not path.exists():
         return set()
 
-    client = _get_client(channel_id)
+    client = _get_client(collection_id)
     try:
         collection = client.get_collection(name="transcripts")
     except ValueError:
@@ -296,25 +290,19 @@ def _get_indexed_video_ids(channel_id: str) -> set[str]:
 
 
 def sync_index(
-    channel_id: str,
+    collection_id: str,
     transcripts: dict[str, tuple[str, str]],
     model_name: str = DEFAULT_MODEL,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
 ) -> tuple[int, int]:
-    """
-    Sync the index with the current transcript set.
-
-    Adds new videos and removes videos no longer in the transcript set.
-
-    Returns:
-        Tuple of (videos_added, videos_removed)
-    """
-    indexed_video_ids = _get_indexed_video_ids(channel_id)
+    indexed_video_ids = _get_indexed_video_ids(collection_id)
     current_video_ids = set(transcripts.keys())
     videos_to_remove = indexed_video_ids - current_video_ids
 
-    removed = delete_videos(channel_id, videos_to_remove)
-    added = build_index(channel_id, transcripts, model_name, chunk_size, chunk_overlap)
+    removed = delete_videos(collection_id, videos_to_remove)
+    added = build_index(
+        collection_id, transcripts, model_name, chunk_size, chunk_overlap
+    )
 
     return added, removed
