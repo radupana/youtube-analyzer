@@ -9,6 +9,7 @@ from yt_agent_kit.agent import (
     ask_output_format,
     ask_source,
     ask_video_count,
+    parse_video_count,
     run_conversation,
 )
 from yt_agent_kit.config import Config, LLMConfig
@@ -133,6 +134,48 @@ class TestAskOutputFormat:
         with patch("builtins.input", return_value="99"):
             result = ask_output_format()
         assert result == "human"
+
+
+class TestParseVideoCount:
+    def test_empty_input_returns_default(self):
+        result = parse_video_count("", max_allowed=100)
+        assert result == 50
+
+    def test_whitespace_input_returns_default(self):
+        result = parse_video_count("   ", max_allowed=100)
+        assert result == 50
+
+    def test_valid_number(self):
+        result = parse_video_count("25", max_allowed=100)
+        assert result == 25
+
+    def test_caps_at_max_allowed(self):
+        result = parse_video_count("200", max_allowed=100)
+        assert result == 100
+
+    def test_negative_returns_default(self, capsys):
+        result = parse_video_count("-5", max_allowed=100)
+        assert result == 50
+        captured = capsys.readouterr()
+        assert "Must be at least 1" in captured.out
+
+    def test_zero_returns_default(self, capsys):
+        result = parse_video_count("0", max_allowed=100)
+        assert result == 50
+        captured = capsys.readouterr()
+        assert "Must be at least 1" in captured.out
+
+    def test_invalid_string_returns_default(self):
+        result = parse_video_count("abc", max_allowed=100)
+        assert result == 50
+
+    def test_custom_default(self):
+        result = parse_video_count("", max_allowed=100, default=25)
+        assert result == 25
+
+    def test_default_capped_at_max(self):
+        result = parse_video_count("", max_allowed=30, default=50)
+        assert result == 30
 
 
 class TestAskVideoCount:

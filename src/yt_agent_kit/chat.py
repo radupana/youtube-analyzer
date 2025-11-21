@@ -30,15 +30,18 @@ class ChatSession:
             formatted_parts.append(f'[Video: "{chunk.video_title}"]\n"{chunk.content}"')
         return "\n---\n".join(formatted_parts)
 
-    def _build_messages(self, question: str, context: str) -> list[Message]:
+    def _build_messages(self, user_content: str) -> list[Message]:
         messages: list[Message] = [Message(role="system", content=SYSTEM_PROMPT)]
 
-        for msg in self.history[-MAX_HISTORY_MESSAGES:]:
+        # Avoid allocating new list if history is short
+        history_slice = (
+            self.history[-MAX_HISTORY_MESSAGES:]
+            if len(self.history) > MAX_HISTORY_MESSAGES
+            else self.history
+        )
+        for msg in history_slice:
             messages.append(msg)
 
-        user_content = (
-            f"Context from videos:\n---\n{context}\n---\n\nQuestion: {question}"
-        )
         messages.append(Message(role="user", content=user_content))
 
         return messages
@@ -51,11 +54,17 @@ class ChatSession:
         )
 
         context = self._format_context(chunks)
-        messages = self._build_messages(question, context)
+        # Include context in the user message that gets stored in history
+        # This ensures multi-turn conversations have consistent context
+        user_content = (
+            f"Context from videos:\n---\n{context}\n---\n\nQuestion: {question}"
+        )
+        messages = self._build_messages(user_content)
 
         response = call_llm(messages, self.llm_config)
 
-        self.history.append(Message(role="user", content=question))
+        # Store the full context-augmented message so history is consistent
+        self.history.append(Message(role="user", content=user_content))
         self.history.append(Message(role="assistant", content=response))
 
         return response

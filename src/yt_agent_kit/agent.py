@@ -141,6 +141,31 @@ def ask_output_format() -> str:
     return format_map.get(choice, "human")
 
 
+def parse_video_count(user_input: str, max_allowed: int, default: int = 50) -> int:
+    """
+    Parse and validate video count from user input.
+
+    Args:
+        user_input: Raw user input string
+        max_allowed: Maximum videos allowed
+        default: Default value if input is empty or invalid
+
+    Returns:
+        Validated video count (at least 1, at most max_allowed)
+    """
+    if not user_input.strip():
+        return min(default, max_allowed)
+
+    try:
+        count = int(user_input)
+        if count < 1:
+            print("Must be at least 1, using default")
+            return min(default, max_allowed)
+        return min(count, max_allowed)
+    except ValueError:
+        return min(default, max_allowed)
+
+
 def ask_video_count(channel: ChannelInfo, max_videos: int) -> int:
     """
     Ask user how many videos to process.

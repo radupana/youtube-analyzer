@@ -6,11 +6,22 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from googleapiclient.discovery import build
+from googleapiclient.discovery import Resource, build
 
 from .cache import get_from_cache, save_to_cache
 
 MAX_RESULTS_PER_PAGE = 50
+
+# Cache YouTube clients by API key to avoid recreating on every function call
+_youtube_clients: dict[str, Resource] = {}
+
+
+def _get_youtube_client(api_key: str) -> Resource:
+    """Get or create a cached YouTube API client for the given API key."""
+    if api_key not in _youtube_clients:
+        _youtube_clients[api_key] = build("youtube", "v3", developerKey=api_key)
+    return _youtube_clients[api_key]
+
 
 VIDEO_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{11}$")
 VIDEO_URL_PATTERN = re.compile(
@@ -80,7 +91,7 @@ def find_channel_id(query: str, api_key: str) -> ChannelInfo:
 
     channel_id = _extract_channel_id(query)
 
-    youtube = build("youtube", "v3", developerKey=api_key)
+    youtube = _get_youtube_client(api_key)
 
     if channel_id:
         request = youtube.channels().list(part="snippet,statistics", id=channel_id)
@@ -142,7 +153,7 @@ def list_videos(
     if cached:
         return [VideoInfo(**v) for v in cached]
 
-    youtube = build("youtube", "v3", developerKey=api_key)
+    youtube = _get_youtube_client(api_key)
 
     search_request = youtube.search().list(
         part="id",
@@ -270,7 +281,7 @@ def get_playlist_video_ids(
     if cached is not None:
         return list(cached)
 
-    youtube = build("youtube", "v3", developerKey=api_key)
+    youtube = _get_youtube_client(api_key)
     video_ids: list[str] = []
 
     request = youtube.playlistItems().list(
@@ -317,7 +328,7 @@ def get_playlist_info(playlist_id: str, api_key: str) -> dict[str, Any]:
     if cached is not None:
         return dict(cached)
 
-    youtube = build("youtube", "v3", developerKey=api_key)
+    youtube = _get_youtube_client(api_key)
     request = youtube.playlists().list(part="snippet", id=playlist_id)
     response = request.execute()
 
@@ -355,7 +366,7 @@ def get_video_info(video_id: str, api_key: str) -> VideoInfo:
     if cached:
         return VideoInfo(**cached)
 
-    youtube = build("youtube", "v3", developerKey=api_key)
+    youtube = _get_youtube_client(api_key)
     request = youtube.videos().list(part="snippet,contentDetails", id=video_id)
     response = request.execute()
 
@@ -411,7 +422,7 @@ def get_videos_batch(video_ids: list[str], api_key: str) -> dict[str, VideoInfo]
         return results
 
     # Batch fetch uncached videos (50 per request - API limit)
-    youtube = build("youtube", "v3", developerKey=api_key)
+    youtube = _get_youtube_client(api_key)
     BATCH_SIZE = 50
 
     for i in range(0, len(uncached_ids), BATCH_SIZE):

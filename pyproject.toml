@@ -27,6 +27,8 @@ dependencies = [
     "requests>=2.31.0",
     "chromadb>=0.4.0",
     "sentence-transformers>=2.2.0",
+    # google-genai is Google's new unified AI SDK (replaces google-generativeai)
+    # See: https://github.com/googleapis/python-genai
     "google-genai>=1.0.0",
 ]
 

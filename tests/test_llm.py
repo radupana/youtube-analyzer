@@ -2,8 +2,17 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from yt_agent_kit import llm
 from yt_agent_kit.config import LLMConfig
 from yt_agent_kit.llm import LLMError, Message, call_gemini, call_llm
+
+
+@pytest.fixture(autouse=True)
+def clear_gemini_client_cache():
+    """Clear the Gemini client cache before each test to ensure clean mocking."""
+    llm._gemini_clients.clear()
+    yield
+    llm._gemini_clients.clear()
 
 
 @pytest.fixture

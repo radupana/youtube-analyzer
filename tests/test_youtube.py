@@ -2,6 +2,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from yt_agent_kit import youtube
 from yt_agent_kit.youtube import (
     InputType,
     detect_input_type,
@@ -12,6 +13,14 @@ from yt_agent_kit.youtube import (
     get_videos_batch,
     list_videos,
 )
+
+
+@pytest.fixture(autouse=True)
+def clear_youtube_client_cache():
+    """Clear the YouTube client cache before each test to ensure clean mocking."""
+    youtube._youtube_clients.clear()
+    yield
+    youtube._youtube_clients.clear()
 
 
 class TestFindChannelId:

@@ -88,23 +88,23 @@ class TestFormatContext:
 
 class TestBuildMessages:
     def test_includes_system_prompt(self, chat_session):
-        messages = chat_session._build_messages("question", "context")
+        messages = chat_session._build_messages("user content here")
         assert messages[0].role == "system"
         assert messages[0].content == SYSTEM_PROMPT
 
-    def test_includes_question_with_context(self, chat_session):
-        messages = chat_session._build_messages("What is X?", "X is Y")
+    def test_includes_user_content(self, chat_session):
+        user_content = "Context: X is Y\n\nQuestion: What is X?"
+        messages = chat_session._build_messages(user_content)
         user_message = messages[-1]
         assert user_message.role == "user"
-        assert "What is X?" in user_message.content
-        assert "X is Y" in user_message.content
+        assert user_message.content == user_content
 
     def test_includes_history(self, chat_session):
         chat_session.history = [
             Message(role="user", content="Previous Q"),
             Message(role="assistant", content="Previous A"),
         ]
-        messages = chat_session._build_messages("New Q", "context")
+        messages = chat_session._build_messages("New content")
         assert len(messages) == 4
         assert messages[1].content == "Previous Q"
         assert messages[2].content == "Previous A"
@@ -114,7 +114,7 @@ class TestBuildMessages:
             Message(role="user", content=f"Q{i}")
             for i in range(MAX_HISTORY_MESSAGES + 10)
         ]
-        messages = chat_session._build_messages("New Q", "context")
+        messages = chat_session._build_messages("New content")
         history_in_messages = [m for m in messages if m.role != "system"][:-1]
         assert len(history_in_messages) == MAX_HISTORY_MESSAGES
 
@@ -153,7 +153,9 @@ class TestAsk:
 
             assert len(chat_session.history) == 2
             assert chat_session.history[0].role == "user"
-            assert chat_session.history[0].content == "Question"
+            # History now stores full context-augmented message for consistency
+            assert "Question" in chat_session.history[0].content
+            assert "Context from videos" in chat_session.history[0].content
             assert chat_session.history[1].role == "assistant"
             assert chat_session.history[1].content == "Response"
 
@@ -185,3 +187,110 @@ class TestClearHistory:
         chat_session.clear_history()
 
         assert chat_session.history == []
+
+
+class TestChatSessionIntegration:
+    """Integration tests for multi-turn conversation flow."""
+
+    def test_multi_turn_conversation_accumulates_history(self, llm_config):
+        """Test that multiple ask() calls properly accumulate conversation history."""
+        session = ChatSession(
+            collection_id="integration_test",
+            llm_config=llm_config,
+        )
+        with (
+            patch("yt_agent_kit.chat.search") as mock_search,
+            patch("yt_agent_kit.chat.call_llm") as mock_llm,
+        ):
+            mock_search.return_value = [
+                Chunk(
+                    content="Video content about topic A",
+                    video_id="vid1",
+                    video_title="Video One",
+                    chunk_index=0,
+                )
+            ]
+            mock_llm.side_effect = ["Answer to Q1", "Answer to Q2", "Answer to Q3"]
+
+            # First question
+            r1 = session.ask("First question?")
+            assert r1 == "Answer to Q1"
+            assert len(session.history) == 2  # user + assistant
+
+            # Second question - should have history from first
+            r2 = session.ask("Second question?")
+            assert r2 == "Answer to Q2"
+            assert len(session.history) == 4  # 2 + 2
+
+            # Third question - history should continue growing
+            r3 = session.ask("Third question?")
+            assert r3 == "Answer to Q3"
+            assert len(session.history) == 6  # 4 + 2
+
+            # Verify search was called each time with the question
+            assert mock_search.call_count == 3
+            assert mock_llm.call_count == 3
+
+    def test_context_included_in_llm_call(self, llm_config):
+        """Test that video context is properly included when calling the LLM."""
+        session = ChatSession(
+            collection_id="context_test",
+            llm_config=llm_config,
+        )
+        with (
+            patch("yt_agent_kit.chat.search") as mock_search,
+            patch("yt_agent_kit.chat.call_llm") as mock_llm,
+        ):
+            mock_search.return_value = [
+                Chunk(
+                    content="Important video content",
+                    video_id="vid1",
+                    video_title="Source Video",
+                    chunk_index=0,
+                )
+            ]
+            mock_llm.return_value = "Response based on context"
+
+            session.ask("What does the video say?")
+
+            # Verify the LLM received messages with context
+            call_args = mock_llm.call_args
+            messages = call_args[0][0]  # First positional arg
+
+            # Should have system + user message
+            assert len(messages) >= 2
+            assert messages[0].role == "system"
+
+            # User message should contain both context and question
+            user_msg = messages[-1]
+            assert "Important video content" in user_msg.content
+            assert "Source Video" in user_msg.content
+            assert "What does the video say?" in user_msg.content
+
+    def test_history_truncation_preserves_recent(self, llm_config):
+        """Test that old history is dropped but recent turns are preserved."""
+        session = ChatSession(
+            collection_id="truncation_test",
+            llm_config=llm_config,
+        )
+        # Pre-populate with lots of history
+        for i in range(MAX_HISTORY_MESSAGES + 10):
+            session.history.append(Message(role="user", content=f"Old Q{i}"))
+            session.history.append(Message(role="assistant", content=f"Old A{i}"))
+
+        with (
+            patch("yt_agent_kit.chat.search") as mock_search,
+            patch("yt_agent_kit.chat.call_llm") as mock_llm,
+        ):
+            mock_search.return_value = []
+            mock_llm.return_value = "New response"
+
+            session.ask("New question?")
+
+            # Verify LLM got truncated history
+            call_args = mock_llm.call_args
+            messages = call_args[0][0]
+            # Should have: system + MAX_HISTORY_MESSAGES + new user message
+            # But only MAX_HISTORY_MESSAGES from history
+            history_msgs = [m for m in messages if m.role != "system"][:-1]
+            assert len(history_msgs) == MAX_HISTORY_MESSAGES

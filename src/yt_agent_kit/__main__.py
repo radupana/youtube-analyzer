@@ -74,7 +74,7 @@ Examples:
             config.output_file,
         )
 
-        from .agent import ask_source
+        from .agent import ask_source, parse_video_count
         from .chat import ChatSession
         from .embeddings import build_index, get_index_stats
         from .transcript import get_transcripts_batch
@@ -89,16 +89,8 @@ Examples:
 
         if input_type == InputType.CHANNEL:
             print("\nHow many videos should I analyze?")
-            count_input = input("Videos [50]: ").strip() or "50"
-            try:
-                max_videos = int(count_input)
-                if max_videos < 1:
-                    print("Must be at least 1, using 50")
-                    max_videos = 50
-                else:
-                    max_videos = min(max_videos, config.max_videos)
-            except ValueError:
-                max_videos = 50
+            count_input = input("Videos [50]: ").strip()
+            max_videos = parse_video_count(count_input, config.max_videos)
 
             channel_id = collection_id.removeprefix("channel_")
             videos = list_videos(channel_id, config.youtube_api_key, max_videos)

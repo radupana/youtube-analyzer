@@ -8,6 +8,9 @@ from google.genai import types
 
 from .config import LLMConfig
 
+# Cache Gemini clients by API key to avoid recreating on every call
+_gemini_clients: dict[str, genai.Client] = {}
+
 
 class LLMError(Exception):
     pass
@@ -19,13 +22,20 @@ class Message:
     content: str
 
 
+def _get_gemini_client(api_key: str) -> genai.Client:
+    """Get or create a cached Gemini client for the given API key."""
+    if api_key not in _gemini_clients:
+        _gemini_clients[api_key] = genai.Client(api_key=api_key)
+    return _gemini_clients[api_key]
+
+
 def call_gemini(messages: list[Message], config: LLMConfig) -> str:
     """Call Gemini API with the given messages.
 
     Note: Only the last system message is used as the system instruction.
     Multiple system messages will result in only the final one being applied.
     """
-    client = genai.Client(api_key=config.api_key)
+    client = _get_gemini_client(config.api_key)
 
     system_instruction: str | None = None
     contents: list[Any] = []  # types.Content, but list invariance causes mypy issues
