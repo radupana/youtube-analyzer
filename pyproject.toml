@@ -37,7 +37,7 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.7.0",
 ]
-gemini = ["google-generativeai>=0.3.0"]
+gemini = ["google-genai>=1.0.0"]
 openai = ["openai>=1.0.0"]
 anthropic = ["anthropic>=0.18.0"]
 all = ["yt-agent-kit[gemini,openai,anthropic]"]
@@ -97,6 +97,8 @@ module = [
     "googleapiclient.discovery",
     "chromadb",
     "sentence_transformers",
+    "google",
+    "google.*",
 ]
 ignore_missing_imports = true
 

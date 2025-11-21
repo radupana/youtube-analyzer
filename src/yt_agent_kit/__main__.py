@@ -74,62 +74,90 @@ Examples:
             config.output_file,
         )
 
-        from .agent import ask_video_count, run_conversation
+        from .agent import ask_source
+        from .chat import ChatSession
+        from .embeddings import build_index, get_index_stats
         from .transcript import get_transcripts_batch
-        from .youtube import list_videos
+        from .youtube import InputType, list_videos
 
         logger.info("Starting conversational agent")
-        state = run_conversation(config)
 
-        if not state.channel:
-            raise ValueError("No channel was selected")
+        input_type, collection_id, title, video_ids = ask_source(config)
 
-        logger.info(
-            "Conversation completed: channel=%s, intent=%s, format=%s",
-            state.channel.title,
-            state.intent,
-            state.output_format,
-        )
+        if input_type == InputType.CHANNEL:
+            print("\nHow many videos should I analyze?")
+            count_input = input("Videos [50]: ").strip() or "50"
+            try:
+                max_videos = min(int(count_input), config.max_videos)
+            except ValueError:
+                max_videos = 50
 
-        state.max_videos = ask_video_count(state.channel, config.max_videos)
-        logger.info("User selected %d videos to process", state.max_videos)
+            channel_id = collection_id.replace("channel_", "")
+            videos = list_videos(channel_id, config.youtube_api_key, max_videos)
+            video_ids = [v.id for v in videos]
+            print(f"Found {len(video_ids)} videos")
 
-        print("\nFetching video list from YouTube...")
-        state.videos = list_videos(
-            state.channel.id, config.youtube_api_key, state.max_videos
-        )
-        logger.info("Retrieved %d videos from channel", len(state.videos))
-
-        print(f"Fetching transcripts for {len(state.videos)} videos...")
+        print(f"\nFetching transcripts for {len(video_ids)} videos...")
 
         def show_progress(current: int, total: int, video_id: str) -> None:
-            """Display progress to user."""
-            video = next((v for v in state.videos if v.id == video_id), None)
-            title = video.title if video else video_id
             percentage = int((current / total) * 100)
-            print(f"Progress: {current}/{total} ({percentage}%) - Fetching: '{title}'")
+            print(f"Progress: {current}/{total} ({percentage}%) - {video_id}")
 
-        video_ids = [v.id for v in state.videos]
-        state.transcripts = get_transcripts_batch(
-            video_ids, progress_callback=show_progress
-        )
+        transcripts = get_transcripts_batch(video_ids, progress_callback=show_progress)
 
-        skipped = len(state.videos) - len(state.transcripts)
+        skipped = len(video_ids) - len(transcripts)
         print(
-            f"\n✅ Successfully fetched {len(state.transcripts)}/{len(state.videos)} transcripts"
+            f"\n✅ Fetched {len(transcripts)}/{len(video_ids)} transcripts"
             + (f" ({skipped} skipped)" if skipped > 0 else "")
         )
 
+        if not transcripts:
+            raise ValueError("No transcripts available for the selected content")
+
+        print("\nBuilding search index...")
+        transcripts_for_index = {vid: (vid, text) for vid, text in transcripts.items()}
+        added = build_index(collection_id, transcripts_for_index)
+        stats = get_index_stats(collection_id)
+        logger.info(
+            "Index built: added=%d, total_chunks=%d, total_videos=%d",
+            added,
+            stats["total_chunks"],
+            stats["total_videos"],
+        )
+        print(
+            f"Indexed {stats['total_videos']} videos ({stats['total_chunks']} chunks)"
+        )
+
         print("\n" + "=" * 60)
-        print("Phase 3 Complete: Transcript Acquisition")
+        print(f"Ready to chat about: {title}")
         print("=" * 60)
-        print(f"Channel: {state.channel.title} ({state.channel.id})")
-        print(f"Intent: {state.intent}")
-        print(f"Output Format: {state.output_format}")
-        print(f"Videos Fetched: {len(state.videos)}")
-        print(f"Transcripts Retrieved: {len(state.transcripts)}")
+        print("Ask questions about the content.")
+        print("Type 'quit' or 'exit' to end the session.")
         print("=" * 60)
-        print("\nNext: Phase 4 will implement LLM extraction and intent mapping.")
+
+        session = ChatSession(
+            collection_id=collection_id,
+            llm_config=config.llm,
+            search_config=config.search,
+        )
+
+        while True:
+            try:
+                print()
+                question = input("You: ").strip()
+                if not question:
+                    continue
+                if question.lower() in ("quit", "exit", "q"):
+                    print("\nGoodbye!")
+                    break
+
+                print()
+                response = session.ask(question)
+                print(f"Assistant: {response}")
+
+            except KeyboardInterrupt:
+                print("\n\nGoodbye!")
+                break
 
         return 0
 

@@ -3,13 +3,31 @@
 import hashlib
 import re
 from dataclasses import dataclass
+from enum import Enum
+from typing import Any
 
 from googleapiclient.discovery import build
 
 from .cache import get_from_cache, save_to_cache
 
-# YouTube API pagination limits
 MAX_RESULTS_PER_PAGE = 50
+
+VIDEO_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{11}$")
+VIDEO_URL_PATTERN = re.compile(
+    r"(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/)([a-zA-Z0-9_-]{11})"
+)
+PLAYLIST_URL_PATTERN = re.compile(r"youtube\.com/playlist\?list=([a-zA-Z0-9_-]+)")
+PLAYLIST_ID_PATTERN = re.compile(r"^PL[a-zA-Z0-9_-]+$")
+CHANNEL_URL_PATTERN = re.compile(r"youtube\.com/channel/([\w-]+)")
+CHANNEL_ID_PATTERN = re.compile(r"^UC[\w-]{22}$")
+HANDLE_PATTERN = re.compile(r"^@[\w.-]+$")
+HANDLE_URL_PATTERN = re.compile(r"youtube\.com/@([\w.-]+)")
+
+
+class InputType(Enum):
+    VIDEO = "video"
+    CHANNEL = "channel"
+    PLAYLIST = "playlist"
 
 
 @dataclass
@@ -181,13 +199,133 @@ def list_videos(
 
 
 def _extract_channel_id(query: str) -> str | None:
-    """Extract channel ID from URL or return None."""
-    channel_pattern = r"youtube\.com/channel/([\w-]+)"
-    match = re.search(channel_pattern, query)
+    match = CHANNEL_URL_PATTERN.search(query)
     if match:
         return match.group(1)
-
-    if re.match(r"^[\w-]{24}$", query):
+    if CHANNEL_ID_PATTERN.match(query):
         return query
-
     return None
+
+
+def detect_input_type(user_input: str) -> tuple[InputType, str]:
+    user_input = user_input.strip()
+
+    match = VIDEO_URL_PATTERN.search(user_input)
+    if match:
+        return InputType.VIDEO, match.group(1)
+
+    match = PLAYLIST_URL_PATTERN.search(user_input)
+    if match:
+        return InputType.PLAYLIST, match.group(1)
+
+    if PLAYLIST_ID_PATTERN.match(user_input):
+        return InputType.PLAYLIST, user_input
+
+    match = HANDLE_URL_PATTERN.search(user_input)
+    if match:
+        return InputType.CHANNEL, f"@{match.group(1)}"
+
+    match = CHANNEL_URL_PATTERN.search(user_input)
+    if match:
+        return InputType.CHANNEL, match.group(1)
+
+    if VIDEO_ID_PATTERN.match(user_input):
+        return InputType.VIDEO, user_input
+
+    if CHANNEL_ID_PATTERN.match(user_input):
+        return InputType.CHANNEL, user_input
+
+    if HANDLE_PATTERN.match(user_input):
+        return InputType.CHANNEL, user_input
+
+    return InputType.CHANNEL, user_input
+
+
+def get_playlist_video_ids(
+    playlist_id: str, api_key: str, max_results: int = 500
+) -> list[str]:
+    cache_key = f"playlist_videos_{playlist_id}_{max_results}"
+    cached = get_from_cache(cache_key)
+    if cached is not None:
+        return list(cached)
+
+    youtube = build("youtube", "v3", developerKey=api_key)
+    video_ids: list[str] = []
+
+    request = youtube.playlistItems().list(
+        part="contentDetails",
+        playlistId=playlist_id,
+        maxResults=min(max_results, MAX_RESULTS_PER_PAGE),
+    )
+
+    while request and len(video_ids) < max_results:
+        response = request.execute()
+
+        for item in response.get("items", []):
+            video_id = item.get("contentDetails", {}).get("videoId")
+            if video_id:
+                video_ids.append(video_id)
+                if len(video_ids) >= max_results:
+                    break
+
+        if len(video_ids) >= max_results:
+            break
+
+        request = youtube.playlistItems().list_next(request, response)
+
+    save_to_cache(cache_key, video_ids)
+    return video_ids
+
+
+def get_playlist_info(playlist_id: str, api_key: str) -> dict[str, Any]:
+    cache_key = f"playlist_info_{playlist_id}"
+    cached = get_from_cache(cache_key)
+    if cached is not None:
+        return dict(cached)
+
+    youtube = build("youtube", "v3", developerKey=api_key)
+    request = youtube.playlists().list(part="snippet", id=playlist_id)
+    response = request.execute()
+
+    if not response.get("items"):
+        raise ValueError(f"Playlist not found: {playlist_id}")
+
+    item = response["items"][0]
+    info = {
+        "id": item["id"],
+        "title": item["snippet"]["title"],
+        "description": item["snippet"].get("description", ""),
+        "channel_title": item["snippet"].get("channelTitle", ""),
+    }
+
+    save_to_cache(cache_key, info)
+    return info
+
+
+def get_video_info(video_id: str, api_key: str) -> VideoInfo:
+    cache_key = f"video_info_{video_id}"
+    cached = get_from_cache(cache_key)
+    if cached:
+        return VideoInfo(**cached)
+
+    youtube = build("youtube", "v3", developerKey=api_key)
+    request = youtube.videos().list(part="snippet,contentDetails", id=video_id)
+    response = request.execute()
+
+    if not response.get("items"):
+        raise ValueError(f"Video not found: {video_id}")
+
+    item = response["items"][0]
+    snippet = item["snippet"]
+    content_details = item["contentDetails"]
+
+    video = VideoInfo(
+        id=item["id"],
+        title=snippet["title"],
+        description=snippet.get("description", ""),
+        published_at=snippet["publishedAt"],
+        duration=content_details["duration"],
+    )
+
+    save_to_cache(cache_key, video.__dict__)
+    return video
