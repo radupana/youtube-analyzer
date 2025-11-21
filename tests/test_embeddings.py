@@ -7,8 +7,10 @@ from yt_agent_kit.embeddings import (
     Chunk,
     build_index,
     chunk_transcript,
+    delete_videos,
     get_index_stats,
     search,
+    sync_index,
 )
 
 
@@ -166,3 +168,91 @@ class TestGetIndexStats:
         assert stats["total_chunks"] > 0
         assert stats["total_videos"] == 2
         assert stats["index_size_mb"] >= 0
+
+
+class TestDeleteVideos:
+    def test_delete_empty_set_returns_zero(self, temp_index_dir):
+        result = delete_videos("channel1", set())
+        assert result == 0
+
+    def test_delete_from_nonexistent_index_returns_zero(self, temp_index_dir):
+        result = delete_videos("nonexistent", {"vid1"})
+        assert result == 0
+
+    def test_deletes_specified_videos(self, temp_index_dir):
+        transcripts = {
+            "vid1": ("Video One", "First transcript content."),
+            "vid2": ("Video Two", "Second transcript content."),
+            "vid3": ("Video Three", "Third transcript content."),
+        }
+        build_index("channel1", transcripts)
+
+        stats_before = get_index_stats("channel1")
+        assert stats_before["total_videos"] == 3
+
+        delete_videos("channel1", {"vid1", "vid2"})
+
+        stats_after = get_index_stats("channel1")
+        assert stats_after["total_videos"] == 1
+
+        results = search("channel1", "transcript")
+        video_ids = {r.video_id for r in results}
+        assert "vid3" in video_ids
+        assert "vid1" not in video_ids
+        assert "vid2" not in video_ids
+
+
+class TestSyncIndex:
+    def test_sync_adds_new_videos(self, temp_index_dir):
+        transcripts = {"vid1": ("Video One", "First transcript.")}
+        added, removed = sync_index("channel1", transcripts)
+        assert added == 1
+        assert removed == 0
+
+    def test_sync_removes_deleted_videos(self, temp_index_dir):
+        initial = {
+            "vid1": ("Video One", "First transcript."),
+            "vid2": ("Video Two", "Second transcript."),
+        }
+        build_index("channel1", initial)
+
+        updated = {"vid1": ("Video One", "First transcript.")}
+        added, removed = sync_index("channel1", updated)
+
+        assert added == 0
+        assert removed == 1
+
+        stats = get_index_stats("channel1")
+        assert stats["total_videos"] == 1
+
+    def test_sync_adds_and_removes(self, temp_index_dir):
+        initial = {
+            "vid1": ("Video One", "First transcript."),
+            "vid2": ("Video Two", "Second transcript."),
+        }
+        build_index("channel1", initial)
+
+        updated = {
+            "vid1": ("Video One", "First transcript."),
+            "vid3": ("Video Three", "Third transcript."),
+        }
+        added, removed = sync_index("channel1", updated)
+
+        assert added == 1
+        assert removed == 1
+
+        stats = get_index_stats("channel1")
+        assert stats["total_videos"] == 2
+
+
+class TestIndexPersistence:
+    def test_index_persists_across_client_instances(self, temp_index_dir):
+        transcripts = {"vid1": ("Video One", "Persistent content here.")}
+        build_index("channel1", transcripts)
+
+        stats1 = get_index_stats("channel1")
+        assert stats1["total_videos"] == 1
+
+        results = search("channel1", "persistent")
+        assert len(results) > 0
+        assert results[0].video_id == "vid1"

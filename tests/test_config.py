@@ -5,7 +5,14 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from yt_agent_kit.config import Config, LLMConfig, load_config, resolve_env_vars
+from yt_agent_kit.config import (
+    Config,
+    EmbeddingsConfig,
+    LLMConfig,
+    SearchConfig,
+    load_config,
+    resolve_env_vars,
+)
 
 
 class TestResolveEnvVars:
@@ -148,8 +155,6 @@ class TestValidateConfig:
         assert config.llm.provider == "gemini"
 
     def test_missing_youtube_key(self):
-        # Pydantic validates at instantiation, so we need to bypass validation
-        # by creating a dict first
         with pytest.raises(
             ValidationError, match="String should have at least 20 characters"
         ):
@@ -161,3 +166,87 @@ class TestValidateConfig:
                 ),
                 youtube_api_key="",
             )
+
+
+class TestEmbeddingsConfig:
+    def test_defaults(self):
+        config = EmbeddingsConfig()
+        assert config.model == "all-MiniLM-L6-v2"
+        assert config.chunk_size == 1200
+        assert config.chunk_overlap == 200
+
+    def test_custom_values(self):
+        config = EmbeddingsConfig(
+            model="custom-model", chunk_size=2000, chunk_overlap=300
+        )
+        assert config.model == "custom-model"
+        assert config.chunk_size == 2000
+        assert config.chunk_overlap == 300
+
+    def test_chunk_size_validation(self):
+        with pytest.raises(ValidationError):
+            EmbeddingsConfig(chunk_size=50)
+
+    def test_chunk_overlap_validation(self):
+        with pytest.raises(ValidationError):
+            EmbeddingsConfig(chunk_overlap=-1)
+
+
+class TestSearchConfig:
+    def test_defaults(self):
+        config = SearchConfig()
+        assert config.top_k == 8
+
+    def test_custom_top_k(self):
+        config = SearchConfig(top_k=15)
+        assert config.top_k == 15
+
+    def test_top_k_validation(self):
+        with pytest.raises(ValidationError):
+            SearchConfig(top_k=0)
+        with pytest.raises(ValidationError):
+            SearchConfig(top_k=100)
+
+
+class TestConfigWithEmbeddings:
+    def test_config_includes_embeddings_defaults(self):
+        config = Config(
+            llm=LLMConfig(
+                provider="gemini",
+                api_key="test-api-key-1234567890",
+                model="model",
+            ),
+            youtube_api_key="youtube-api-key-1234567890",
+        )
+        assert config.embeddings.model == "all-MiniLM-L6-v2"
+        assert config.embeddings.chunk_size == 1200
+        assert config.search.top_k == 8
+
+    def test_load_config_with_embeddings(self):
+        config_data = {
+            "llm": {
+                "provider": "gemini",
+                "api_key": "test-api-key-1234567890",
+                "model": "gemini-2.0-flash",
+            },
+            "youtube_api_key": "youtube-api-key-1234567890",
+            "embeddings": {
+                "model": "custom-embed-model",
+                "chunk_size": 1500,
+                "chunk_overlap": 250,
+            },
+            "search": {"top_k": 10},
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump(config_data, f)
+            config_path = Path(f.name)
+
+        try:
+            config = load_config(config_path)
+            assert config.embeddings.model == "custom-embed-model"
+            assert config.embeddings.chunk_size == 1500
+            assert config.embeddings.chunk_overlap == 250
+            assert config.search.top_k == 10
+        finally:
+            config_path.unlink()

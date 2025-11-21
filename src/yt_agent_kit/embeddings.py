@@ -194,3 +194,75 @@ def get_index_stats(channel_id: str) -> dict[str, int | float]:
         "total_videos": len(video_ids),
         "index_size_mb": size_mb,
     }
+
+
+def delete_videos(channel_id: str, video_ids: set[str]) -> int:
+    """Delete videos from the index that are no longer in the transcript set."""
+    if not video_ids:
+        return 0
+
+    path = _get_collection_path(channel_id)
+    if not path.exists():
+        return 0
+
+    client = _get_client(channel_id)
+
+    try:
+        collection = client.get_collection(name="transcripts")
+    except ValueError:
+        return 0
+
+    if collection.count() == 0:
+        return 0
+
+    all_data = collection.get()
+    ids_to_delete: list[str] = []
+
+    for i, meta in enumerate(all_data.get("metadatas", []) or []):
+        if meta and meta.get("video_id") in video_ids:
+            chunk_id = all_data.get("ids", [])[i]
+            ids_to_delete.append(chunk_id)
+
+    if ids_to_delete:
+        collection.delete(ids=ids_to_delete)
+
+    return len(video_ids)
+
+
+def sync_index(
+    channel_id: str,
+    transcripts: dict[str, tuple[str, str]],
+    model_name: str = DEFAULT_MODEL,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+    chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
+) -> tuple[int, int]:
+    """
+    Sync the index with the current transcript set.
+
+    Adds new videos and removes videos no longer in the transcript set.
+
+    Returns:
+        Tuple of (videos_added, videos_removed)
+    """
+    path = _get_collection_path(channel_id)
+
+    indexed_video_ids: set[str] = set()
+    if path.exists():
+        client = _get_client(channel_id)
+        try:
+            collection = client.get_collection(name="transcripts")
+            if collection.count() > 0:
+                all_metadata = collection.get()
+                for meta in all_metadata.get("metadatas", []) or []:
+                    if meta and "video_id" in meta:
+                        indexed_video_ids.add(meta["video_id"])
+        except ValueError:
+            pass
+
+    current_video_ids = set(transcripts.keys())
+    videos_to_remove = indexed_video_ids - current_video_ids
+
+    removed = delete_videos(channel_id, videos_to_remove)
+    added = build_index(channel_id, transcripts, model_name, chunk_size, chunk_overlap)
+
+    return added, removed

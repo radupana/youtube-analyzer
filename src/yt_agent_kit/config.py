@@ -16,11 +16,23 @@ class LLMConfig(BaseModel):
     model: str = Field(..., min_length=1)
 
 
+class EmbeddingsConfig(BaseModel):
+    model: str = Field(default="all-MiniLM-L6-v2")
+    chunk_size: int = Field(default=1200, ge=100, le=10000)
+    chunk_overlap: int = Field(default=200, ge=0, le=1000)
+
+
+class SearchConfig(BaseModel):
+    top_k: int = Field(default=8, ge=1, le=50)
+
+
 class Config(BaseModel):
     llm: LLMConfig
     youtube_api_key: str = Field(..., min_length=20)
     output_file: str = Field(default="results.json")
     max_videos: int = Field(default=50, ge=1, le=1000)
+    embeddings: EmbeddingsConfig = Field(default_factory=EmbeddingsConfig)
+    search: SearchConfig = Field(default_factory=SearchConfig)
 
 
 def resolve_env_vars(value: Any, depth: int = 0, max_depth: int = 100) -> Any:
