@@ -1,6 +1,8 @@
 """Vector store and embeddings for semantic search over transcripts."""
 
+import re
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +13,9 @@ INDEX_DIR = Path(".index")
 DEFAULT_MODEL = "all-MiniLM-L6-v2"
 DEFAULT_CHUNK_SIZE = 1200
 DEFAULT_CHUNK_OVERLAP = 200
+BATCH_SIZE = 1000
+
+CHANNEL_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
 @dataclass
@@ -19,6 +24,16 @@ class Chunk:
     video_id: str
     video_title: str
     chunk_index: int
+
+
+@lru_cache(maxsize=4)
+def _get_model(model_name: str) -> SentenceTransformer:
+    return SentenceTransformer(model_name)
+
+
+def _validate_channel_id(channel_id: str) -> None:
+    if not channel_id or not CHANNEL_ID_PATTERN.match(channel_id):
+        raise ValueError(f"Invalid channel_id: {channel_id}")
 
 
 def chunk_transcript(
@@ -30,6 +45,11 @@ def chunk_transcript(
 ) -> list[Chunk]:
     if not text:
         return []
+
+    if chunk_overlap >= chunk_size:
+        raise ValueError(
+            f"chunk_overlap ({chunk_overlap}) must be less than chunk_size ({chunk_size})"
+        )
 
     chunks: list[Chunk] = []
     start = 0
@@ -58,6 +78,7 @@ def chunk_transcript(
 
 
 def _get_collection_path(channel_id: str) -> Path:
+    _validate_channel_id(channel_id)
     return INDEX_DIR / channel_id
 
 
@@ -74,6 +95,8 @@ def build_index(
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
 ) -> int:
+    _validate_channel_id(channel_id)
+
     if not transcripts:
         return 0
 
@@ -94,7 +117,7 @@ def build_index(
     if not new_transcripts:
         return 0
 
-    model = SentenceTransformer(model_name)
+    model = _get_model(model_name)
 
     all_chunks: list[Chunk] = []
     for video_id, (title, text) in new_transcripts.items():
@@ -142,7 +165,7 @@ def search(
     if collection.count() == 0:
         return []
 
-    model = SentenceTransformer(model_name)
+    model = _get_model(model_name)
     query_embedding = model.encode([query], show_progress_bar=False).tolist()
 
     results = collection.query(query_embeddings=query_embedding, n_results=k)
@@ -180,11 +203,13 @@ def get_index_stats(channel_id: str) -> dict[str, int | float]:
     total_chunks = collection.count()
 
     video_ids: set[str] = set()
-    if total_chunks > 0:
-        all_metadata = collection.get()
-        for meta in all_metadata.get("metadatas", []) or []:
+    offset = 0
+    while offset < total_chunks:
+        batch = collection.get(limit=BATCH_SIZE, offset=offset)
+        for meta in batch.get("metadatas", []) or []:
             if meta and "video_id" in meta:
                 video_ids.add(meta["video_id"])
+        offset += BATCH_SIZE
 
     size_bytes = sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
     size_mb = round(size_bytes / (1024 * 1024), 2)
@@ -197,7 +222,11 @@ def get_index_stats(channel_id: str) -> dict[str, int | float]:
 
 
 def delete_videos(channel_id: str, video_ids: set[str]) -> int:
-    """Delete videos from the index that are no longer in the transcript set."""
+    """Delete videos from the index that are no longer in the transcript set.
+
+    Returns:
+        Number of videos actually deleted from the index.
+    """
     if not video_ids:
         return 0
 
@@ -212,21 +241,58 @@ def delete_videos(channel_id: str, video_ids: set[str]) -> int:
     except ValueError:
         return 0
 
-    if collection.count() == 0:
+    total_count = collection.count()
+    if total_count == 0:
         return 0
 
-    all_data = collection.get()
     ids_to_delete: list[str] = []
+    deleted_video_ids: set[str] = set()
+    offset = 0
 
-    for i, meta in enumerate(all_data.get("metadatas", []) or []):
-        if meta and meta.get("video_id") in video_ids:
-            chunk_id = all_data.get("ids", [])[i]
-            ids_to_delete.append(chunk_id)
+    while offset < total_count:
+        batch = collection.get(limit=BATCH_SIZE, offset=offset)
+        batch_ids = batch.get("ids", [])
+        batch_metadatas = batch.get("metadatas", [])
+
+        for chunk_id, meta in zip(batch_ids, batch_metadatas, strict=True):
+            if meta and meta.get("video_id") in video_ids:
+                ids_to_delete.append(chunk_id)
+                deleted_video_ids.add(meta["video_id"])
+
+        offset += BATCH_SIZE
 
     if ids_to_delete:
         collection.delete(ids=ids_to_delete)
 
-    return len(video_ids)
+    return len(deleted_video_ids)
+
+
+def _get_indexed_video_ids(channel_id: str) -> set[str]:
+    """Get all video IDs currently in the index using batch processing."""
+    path = _get_collection_path(channel_id)
+    if not path.exists():
+        return set()
+
+    client = _get_client(channel_id)
+    try:
+        collection = client.get_collection(name="transcripts")
+    except ValueError:
+        return set()
+
+    total_count = collection.count()
+    if total_count == 0:
+        return set()
+
+    video_ids: set[str] = set()
+    offset = 0
+    while offset < total_count:
+        batch = collection.get(limit=BATCH_SIZE, offset=offset)
+        for meta in batch.get("metadatas", []) or []:
+            if meta and "video_id" in meta:
+                video_ids.add(meta["video_id"])
+        offset += BATCH_SIZE
+
+    return video_ids
 
 
 def sync_index(
@@ -244,21 +310,7 @@ def sync_index(
     Returns:
         Tuple of (videos_added, videos_removed)
     """
-    path = _get_collection_path(channel_id)
-
-    indexed_video_ids: set[str] = set()
-    if path.exists():
-        client = _get_client(channel_id)
-        try:
-            collection = client.get_collection(name="transcripts")
-            if collection.count() > 0:
-                all_metadata = collection.get()
-                for meta in all_metadata.get("metadatas", []) or []:
-                    if meta and "video_id" in meta:
-                        indexed_video_ids.add(meta["video_id"])
-        except ValueError:
-            pass
-
+    indexed_video_ids = _get_indexed_video_ids(channel_id)
     current_video_ids = set(transcripts.keys())
     videos_to_remove = indexed_video_ids - current_video_ids
 

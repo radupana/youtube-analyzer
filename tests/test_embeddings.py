@@ -25,7 +25,9 @@ class TestChunkTranscript:
 
     def test_short_text_returns_single_chunk(self):
         text = "This is a short transcript."
-        result = chunk_transcript(text, "vid1", "Video 1", chunk_size=100)
+        result = chunk_transcript(
+            text, "vid1", "Video 1", chunk_size=100, chunk_overlap=20
+        )
         assert len(result) == 1
         assert result[0].content == text
         assert result[0].video_id == "vid1"
@@ -73,6 +75,22 @@ class TestChunkTranscript:
         result = chunk_transcript(text, "vid1", "Title")
         assert len(result) >= 2
 
+    def test_overlap_equal_to_chunk_size_raises(self):
+        with pytest.raises(
+            ValueError, match="chunk_overlap.*must be less than chunk_size"
+        ):
+            chunk_transcript(
+                "some text", "vid1", "Title", chunk_size=100, chunk_overlap=100
+            )
+
+    def test_overlap_greater_than_chunk_size_raises(self):
+        with pytest.raises(
+            ValueError, match="chunk_overlap.*must be less than chunk_size"
+        ):
+            chunk_transcript(
+                "some text", "vid1", "Title", chunk_size=100, chunk_overlap=150
+            )
+
 
 @pytest.fixture
 def temp_index_dir(tmp_path, monkeypatch):
@@ -80,7 +98,7 @@ def temp_index_dir(tmp_path, monkeypatch):
     monkeypatch.setattr("yt_agent_kit.embeddings.INDEX_DIR", test_index)
     yield test_index
     if test_index.exists():
-        shutil.rmtree(test_index)
+        shutil.rmtree(test_index, ignore_errors=True)
 
 
 class TestBuildIndex:
@@ -256,3 +274,26 @@ class TestIndexPersistence:
         results = search("channel1", "persistent")
         assert len(results) > 0
         assert results[0].video_id == "vid1"
+
+
+class TestChannelIdValidation:
+    def test_valid_channel_ids(self, temp_index_dir):
+        valid_ids = ["UCabcdef123", "channel_1", "my-channel", "ABC123"]
+        for channel_id in valid_ids:
+            build_index(channel_id, {})
+
+    def test_path_traversal_rejected(self, temp_index_dir):
+        with pytest.raises(ValueError, match="Invalid channel_id"):
+            build_index("../malicious", {})
+
+    def test_slash_rejected(self, temp_index_dir):
+        with pytest.raises(ValueError, match="Invalid channel_id"):
+            build_index("foo/bar", {})
+
+    def test_empty_channel_id_rejected(self, temp_index_dir):
+        with pytest.raises(ValueError, match="Invalid channel_id"):
+            build_index("", {})
+
+    def test_special_chars_rejected(self, temp_index_dir):
+        with pytest.raises(ValueError, match="Invalid channel_id"):
+            build_index("channel@test", {})
