@@ -224,6 +224,8 @@ config.yaml
 results/
 .cache/
 .checkpoints/
+.index/
+chroma/
 
 # Local development
 *.local
