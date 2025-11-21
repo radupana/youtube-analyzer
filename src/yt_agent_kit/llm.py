@@ -1,6 +1,7 @@
 """LLM provider abstraction for chat functionality."""
 
 from dataclasses import dataclass
+from typing import Any
 
 from google import genai
 from google.genai import types
@@ -21,8 +22,8 @@ class Message:
 def call_gemini(messages: list[Message], config: LLMConfig) -> str:
     client = genai.Client(api_key=config.api_key)
 
-    system_instruction = None
-    contents: list[types.Content] = []
+    system_instruction: str | None = None
+    contents: list[Any] = []  # types.Content, but list invariance causes mypy issues
 
     for msg in messages:
         if msg.role == "system":
