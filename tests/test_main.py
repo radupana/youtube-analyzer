@@ -68,8 +68,8 @@ class TestMain:
                 ),
             ):
                 with patch(
-                    "yt_agent_kit.youtube.get_video_info",
-                    return_value=mock_video_info,
+                    "yt_agent_kit.youtube.get_videos_batch",
+                    return_value={"abc123": mock_video_info},
                 ):
                     with patch(
                         "yt_agent_kit.transcript.get_transcripts_batch",
@@ -124,8 +124,8 @@ class TestMain:
                 ),
             ):
                 with patch(
-                    "yt_agent_kit.youtube.get_video_info",
-                    return_value=mock_video_info,
+                    "yt_agent_kit.youtube.get_videos_batch",
+                    return_value={"abc123": mock_video_info},
                 ):
                     with patch(
                         "yt_agent_kit.transcript.get_transcripts_batch",
@@ -206,8 +206,61 @@ class TestMain:
 
         assert exit_code == 0
 
+    def test_channel_negative_video_count_defaults_to_50(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Test that negative video count input defaults to 50."""
+        monkeypatch.chdir(tmp_path)
+
+        config = Config(
+            llm=LLMConfig(
+                provider="gemini",
+                api_key="test-api-key-1234567890",
+                model="gemini-2.0-flash",
+            ),
+            youtube_api_key="youtube-api-key-1234567890",
+        )
+
+        mock_video = Mock()
+        mock_video.id = "vid1"
+        mock_video.title = "Video 1"
+
+        with patch("yt_agent_kit.__main__.load_config", return_value=config):
+            with patch(
+                "yt_agent_kit.agent.ask_source",
+                return_value=(InputType.CHANNEL, "channel_UC123", "Test Channel", []),
+            ):
+                with patch(
+                    "yt_agent_kit.youtube.list_videos", return_value=[mock_video]
+                ):
+                    with patch(
+                        "yt_agent_kit.transcript.get_transcripts_batch",
+                        return_value={"vid1": "transcript"},
+                    ):
+                        with patch(
+                            "yt_agent_kit.embeddings.build_index", return_value=1
+                        ):
+                            with patch(
+                                "yt_agent_kit.embeddings.get_index_stats",
+                                return_value={
+                                    "total_chunks": 5,
+                                    "total_videos": 1,
+                                    "index_size_mb": 0.1,
+                                },
+                            ):
+                                # -5 is negative, should default to 50
+                                with patch(
+                                    "builtins.input", side_effect=["-5", "quit"]
+                                ):
+                                    with patch("sys.argv", ["yt_agent_kit"]):
+                                        exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Must be at least 1" in captured.out
+
     def test_video_info_fetch_fallback(self, tmp_path, monkeypatch):
-        """Test that video ID is used as fallback when get_video_info fails."""
+        """Test that video ID is used as fallback when get_videos_batch returns empty."""
         monkeypatch.chdir(tmp_path)
 
         config = Config(
@@ -229,9 +282,10 @@ class TestMain:
                     ["abc123"],
                 ),
             ):
+                # Return empty dict - video not found, fallback to ID
                 with patch(
-                    "yt_agent_kit.youtube.get_video_info",
-                    side_effect=ValueError("Video not found"),
+                    "yt_agent_kit.youtube.get_videos_batch",
+                    return_value={},
                 ):
                     with patch(
                         "yt_agent_kit.transcript.get_transcripts_batch",
@@ -332,8 +386,8 @@ class TestMain:
                 ),
             ):
                 with patch(
-                    "yt_agent_kit.youtube.get_video_info",
-                    return_value=mock_video_info,
+                    "yt_agent_kit.youtube.get_videos_batch",
+                    return_value={"abc123": mock_video_info},
                 ):
                     with patch(
                         "yt_agent_kit.transcript.get_transcripts_batch",

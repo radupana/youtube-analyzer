@@ -208,6 +208,16 @@ def _extract_channel_id(query: str) -> str | None:
 
 
 def detect_input_type(user_input: str) -> tuple[InputType, str]:
+    """
+    Detect the type of YouTube input and extract the identifier.
+
+    Args:
+        user_input: A YouTube URL, video ID, playlist ID, channel ID, or @handle
+
+    Returns:
+        Tuple of (InputType, identifier) where identifier is the video ID,
+        playlist ID, channel ID, or @handle depending on the input type
+    """
     user_input = user_input.strip()
 
     match = VIDEO_URL_PATTERN.search(user_input)
@@ -244,6 +254,17 @@ def detect_input_type(user_input: str) -> tuple[InputType, str]:
 def get_playlist_video_ids(
     playlist_id: str, api_key: str, max_results: int = 500
 ) -> list[str]:
+    """
+    Get all video IDs from a YouTube playlist.
+
+    Args:
+        playlist_id: YouTube playlist ID (e.g., PLxxxxx)
+        api_key: YouTube Data API key
+        max_results: Maximum number of video IDs to return (default 500)
+
+    Returns:
+        List of video IDs in playlist order
+    """
     cache_key = f"playlist_videos_{playlist_id}_{max_results}"
     cached = get_from_cache(cache_key)
     if cached is not None:
@@ -278,6 +299,19 @@ def get_playlist_video_ids(
 
 
 def get_playlist_info(playlist_id: str, api_key: str) -> dict[str, Any]:
+    """
+    Get metadata for a YouTube playlist.
+
+    Args:
+        playlist_id: YouTube playlist ID
+        api_key: YouTube Data API key
+
+    Returns:
+        Dict with id, title, description, and channel_title
+
+    Raises:
+        ValueError: If playlist not found
+    """
     cache_key = f"playlist_info_{playlist_id}"
     cached = get_from_cache(cache_key)
     if cached is not None:
@@ -303,6 +337,19 @@ def get_playlist_info(playlist_id: str, api_key: str) -> dict[str, Any]:
 
 
 def get_video_info(video_id: str, api_key: str) -> VideoInfo:
+    """
+    Get metadata for a single YouTube video.
+
+    Args:
+        video_id: YouTube video ID (11 character string)
+        api_key: YouTube Data API key
+
+    Returns:
+        VideoInfo with id, title, description, published_at, and duration
+
+    Raises:
+        ValueError: If video not found
+    """
     cache_key = f"video_info_{video_id}"
     cached = get_from_cache(cache_key)
     if cached:
@@ -329,3 +376,64 @@ def get_video_info(video_id: str, api_key: str) -> VideoInfo:
 
     save_to_cache(cache_key, video.__dict__)
     return video
+
+
+def get_videos_batch(video_ids: list[str], api_key: str) -> dict[str, VideoInfo]:
+    """
+    Get metadata for multiple videos in batched API calls.
+
+    More efficient than calling get_video_info() for each video individually.
+    Fetches up to 50 videos per API call (YouTube API limit).
+
+    Args:
+        video_ids: List of YouTube video IDs
+        api_key: YouTube Data API key
+
+    Returns:
+        Dict mapping video_id to VideoInfo. Missing videos are omitted.
+    """
+    if not video_ids:
+        return {}
+
+    results: dict[str, VideoInfo] = {}
+    uncached_ids: list[str] = []
+
+    # Check cache first
+    for vid in video_ids:
+        cache_key = f"video_info_{vid}"
+        cached = get_from_cache(cache_key)
+        if cached:
+            results[vid] = VideoInfo(**cached)
+        else:
+            uncached_ids.append(vid)
+
+    if not uncached_ids:
+        return results
+
+    # Batch fetch uncached videos (50 per request - API limit)
+    youtube = build("youtube", "v3", developerKey=api_key)
+    BATCH_SIZE = 50
+
+    for i in range(0, len(uncached_ids), BATCH_SIZE):
+        batch = uncached_ids[i : i + BATCH_SIZE]
+        request = youtube.videos().list(
+            part="snippet,contentDetails", id=",".join(batch)
+        )
+        response = request.execute()
+
+        for item in response.get("items", []):
+            snippet = item["snippet"]
+            content_details = item["contentDetails"]
+
+            video = VideoInfo(
+                id=item["id"],
+                title=snippet["title"],
+                description=snippet.get("description", ""),
+                published_at=snippet["publishedAt"],
+                duration=content_details["duration"],
+            )
+
+            results[item["id"]] = video
+            save_to_cache(f"video_info_{item['id']}", video.__dict__)
+
+    return results

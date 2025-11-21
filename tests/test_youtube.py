@@ -9,6 +9,7 @@ from yt_agent_kit.youtube import (
     get_playlist_info,
     get_playlist_video_ids,
     get_video_info,
+    get_videos_batch,
     list_videos,
 )
 
@@ -640,3 +641,100 @@ class TestGetVideoInfo:
         with patch("yt_agent_kit.youtube.build", return_value=mock_youtube):
             with pytest.raises(ValueError, match="Video not found"):
                 get_video_info("nonexistent", "test-api-key")
+
+
+class TestGetVideosBatch:
+    def test_empty_list_returns_empty_dict(self):
+        result = get_videos_batch([], "test-api-key")
+        assert result == {}
+
+    def test_fetches_multiple_videos(self):
+        mock_youtube = Mock()
+        mock_videos = Mock()
+        mock_youtube.videos.return_value = mock_videos
+
+        mock_request = Mock()
+        mock_videos.list.return_value = mock_request
+        mock_request.execute.return_value = {
+            "items": [
+                {
+                    "id": "vid1",
+                    "snippet": {
+                        "title": "Video 1",
+                        "description": "Desc 1",
+                        "publishedAt": "2024-01-01T00:00:00Z",
+                    },
+                    "contentDetails": {"duration": "PT5M"},
+                },
+                {
+                    "id": "vid2",
+                    "snippet": {
+                        "title": "Video 2",
+                        "description": "Desc 2",
+                        "publishedAt": "2024-01-02T00:00:00Z",
+                    },
+                    "contentDetails": {"duration": "PT10M"},
+                },
+            ]
+        }
+
+        with patch("yt_agent_kit.youtube.build", return_value=mock_youtube):
+            with patch("yt_agent_kit.youtube.get_from_cache", return_value=None):
+                with patch("yt_agent_kit.youtube.save_to_cache"):
+                    result = get_videos_batch(["vid1", "vid2"], "test-api-key")
+
+        assert len(result) == 2
+        assert result["vid1"].title == "Video 1"
+        assert result["vid2"].title == "Video 2"
+
+    def test_uses_cache_for_existing_videos(self):
+        cached_video = {
+            "id": "cached_vid",
+            "title": "Cached Video",
+            "description": "From cache",
+            "published_at": "2024-01-01T00:00:00Z",
+            "duration": "PT3M",
+        }
+
+        def mock_cache(key):
+            if key == "video_info_cached_vid":
+                return cached_video
+            return None
+
+        with patch("yt_agent_kit.youtube.get_from_cache", side_effect=mock_cache):
+            result = get_videos_batch(["cached_vid"], "test-api-key")
+
+        assert len(result) == 1
+        assert result["cached_vid"].title == "Cached Video"
+
+    def test_handles_missing_videos(self):
+        """Videos not returned by API are omitted from result."""
+        mock_youtube = Mock()
+        mock_videos = Mock()
+        mock_youtube.videos.return_value = mock_videos
+
+        mock_request = Mock()
+        mock_videos.list.return_value = mock_request
+        # API only returns vid1, not vid2
+        mock_request.execute.return_value = {
+            "items": [
+                {
+                    "id": "vid1",
+                    "snippet": {
+                        "title": "Video 1",
+                        "description": "",
+                        "publishedAt": "2024-01-01T00:00:00Z",
+                    },
+                    "contentDetails": {"duration": "PT5M"},
+                }
+            ]
+        }
+
+        with patch("yt_agent_kit.youtube.build", return_value=mock_youtube):
+            with patch("yt_agent_kit.youtube.get_from_cache", return_value=None):
+                with patch("yt_agent_kit.youtube.save_to_cache"):
+                    result = get_videos_batch(["vid1", "vid2"], "test-api-key")
+
+        assert len(result) == 1
+        assert "vid1" in result
+        assert "vid2" not in result

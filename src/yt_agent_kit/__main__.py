@@ -78,7 +78,7 @@ Examples:
         from .chat import ChatSession
         from .embeddings import build_index, get_index_stats
         from .transcript import get_transcripts_batch
-        from .youtube import InputType, get_video_info, list_videos
+        from .youtube import InputType, get_videos_batch, list_videos
 
         logger.info("Starting conversational agent")
 
@@ -91,7 +91,12 @@ Examples:
             print("\nHow many videos should I analyze?")
             count_input = input("Videos [50]: ").strip() or "50"
             try:
-                max_videos = min(int(count_input), config.max_videos)
+                max_videos = int(count_input)
+                if max_videos < 1:
+                    print("Must be at least 1, using 50")
+                    max_videos = 50
+                else:
+                    max_videos = min(max_videos, config.max_videos)
             except ValueError:
                 max_videos = 50
 
@@ -101,12 +106,12 @@ Examples:
             video_titles = {v.id: v.title for v in videos}
             print(f"Found {len(video_ids)} videos")
         else:
-            # For videos/playlists, fetch titles for each video
+            # For videos/playlists, batch fetch titles (more efficient)
+            video_infos = get_videos_batch(video_ids, config.youtube_api_key)
             for vid in video_ids:
-                try:
-                    info = get_video_info(vid, config.youtube_api_key)
-                    video_titles[vid] = info.title
-                except ValueError:
+                if vid in video_infos:
+                    video_titles[vid] = video_infos[vid].title
+                else:
                     video_titles[vid] = vid  # Fallback to ID if fetch fails
 
         print(f"\nFetching transcripts for {len(video_ids)} videos...")
