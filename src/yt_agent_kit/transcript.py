@@ -6,10 +6,8 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import cast
 
-from youtube_transcript_api import (  # type: ignore[import-not-found]
-    YouTubeTranscriptApi,
-)
-from youtube_transcript_api._errors import (  # type: ignore[import-not-found]
+from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api._errors import (
     IpBlocked,
     NoTranscriptFound,
     TranscriptsDisabled,
@@ -74,11 +72,7 @@ def get_transcript(video_id: str, languages: list[str] | None = None) -> str:
     transcript = transcript_list.find_transcript(languages)
     transcript_data = transcript.fetch()
 
-    # Handle both object and dict formats (for testing and real API)
-    raw_text = " ".join(
-        entry.text if hasattr(entry, "text") else entry["text"]
-        for entry in transcript_data
-    )
+    raw_text = " ".join(entry.text for entry in transcript_data)
     cleaned_text = clean_transcript(raw_text)
 
     save_to_cache(cache_key, cleaned_text)

@@ -64,10 +64,11 @@ class TestGetTranscript:
     def test_fetches_and_cleans_transcript(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
 
-        mock_transcript_data = [
-            {"text": "Hello [MUSIC] world", "start": 0.0, "duration": 1.0},
-            {"text": "This is a test", "start": 1.0, "duration": 2.0},
-        ]
+        mock_snippet1 = Mock()
+        mock_snippet1.text = "Hello [MUSIC] world"
+        mock_snippet2 = Mock()
+        mock_snippet2.text = "This is a test"
+        mock_transcript_data = [mock_snippet1, mock_snippet2]
 
         mock_transcript = Mock()
         mock_transcript.fetch.return_value = mock_transcript_data
@@ -88,7 +89,9 @@ class TestGetTranscript:
     def test_uses_custom_languages(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
 
-        mock_transcript_data = [{"text": "Bonjour", "start": 0.0, "duration": 1.0}]
+        mock_snippet = Mock()
+        mock_snippet.text = "Bonjour"
+        mock_transcript_data = [mock_snippet]
 
         mock_transcript = Mock()
         mock_transcript.fetch.return_value = mock_transcript_data
@@ -110,9 +113,9 @@ class TestGetTranscript:
     def test_caches_transcript(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
 
-        mock_transcript_data = [
-            {"text": "Cached content", "start": 0.0, "duration": 1.0}
-        ]
+        mock_snippet = Mock()
+        mock_snippet.text = "Cached content"
+        mock_transcript_data = [mock_snippet]
 
         mock_transcript = Mock()
         mock_transcript.fetch.return_value = mock_transcript_data

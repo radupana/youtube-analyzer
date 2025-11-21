@@ -4,7 +4,7 @@ import hashlib
 import re
 from dataclasses import dataclass
 
-from googleapiclient.discovery import build  # type: ignore[import-not-found]
+from googleapiclient.discovery import build
 
 from .cache import get_from_cache, save_to_cache
 

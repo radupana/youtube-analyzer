@@ -296,22 +296,27 @@ class TestListVideos:
 
         mock_search.list_next.side_effect = [mock_search_request2, None]
 
-        mock_video_request = Mock()
-        mock_videos.list.return_value = mock_video_request
-        mock_video_request.execute.return_value = {
-            "items": [
-                {
-                    "id": f"vid{i}",
-                    "snippet": {
-                        "title": f"Video {i}",
-                        "description": f"Description {i}",
-                        "publishedAt": "2024-01-01T00:00:00Z",
-                    },
-                    "contentDetails": {"duration": "PT10M"},
-                }
-                for i in range(75)
-            ]
-        }
+        # Mock videos.list to return items matching the requested batch
+        def mock_video_list(**kwargs):
+            video_ids = kwargs.get("id", "").split(",")
+            mock_request = Mock()
+            mock_request.execute.return_value = {
+                "items": [
+                    {
+                        "id": vid_id,
+                        "snippet": {
+                            "title": f"Video {vid_id}",
+                            "description": f"Description {vid_id}",
+                            "publishedAt": "2024-01-01T00:00:00Z",
+                        },
+                        "contentDetails": {"duration": "PT10M"},
+                    }
+                    for vid_id in video_ids
+                ]
+            }
+            return mock_request
+
+        mock_videos.list.side_effect = mock_video_list
 
         with patch("yt_agent_kit.youtube.build", return_value=mock_youtube):
             result = list_videos(
