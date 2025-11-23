@@ -32,39 +32,55 @@ class ConversationState:
     transcripts: dict[str, str] = field(default_factory=dict)
 
 
+def confirm_selection(prompt: str) -> bool:
+    """Ask user to confirm a selection."""
+    response = input(prompt).strip().lower()
+    return response in ("y", "yes", "")
+
+
 def ask_source(config: Config) -> tuple[InputType, str, str, list[str]]:
     print("\nHi! What YouTube content should I analyze?")
     print("(video URL, playlist URL, channel name, @handle, or channel URL)")
     print()
 
-    query = input("Source: ").strip()
+    while True:
+        query = input("Source: ").strip()
 
-    if not query:
-        raise ValueError("Input cannot be empty")
-    if len(query) > MAX_INPUT_LENGTH:
-        raise ValueError(f"Input too long (max {MAX_INPUT_LENGTH} characters)")
+        if not query:
+            raise ValueError("Input cannot be empty")
+        if len(query) > MAX_INPUT_LENGTH:
+            raise ValueError(f"Input too long (max {MAX_INPUT_LENGTH} characters)")
 
-    input_type, extracted = detect_input_type(query)
+        input_type, extracted = detect_input_type(query)
 
-    if input_type == InputType.VIDEO:
-        video = get_video_info(extracted, config.youtube_api_key)
-        print(f"\nFound video: {video.title}")
-        return input_type, f"video_{extracted}", video.title, [extracted]
+        if input_type == InputType.VIDEO:
+            video = get_video_info(extracted, config.youtube_api_key)
+            print(f"\nFound video: {video.title}")
+            if confirm_selection("Is this correct? [Y/n]: "):
+                return input_type, f"video_{extracted}", video.title, [extracted]
+            print("\nLet's try again.")
+            continue
 
-    elif input_type == InputType.PLAYLIST:
-        playlist = get_playlist_info(extracted, config.youtube_api_key)
-        video_ids = get_playlist_video_ids(
-            extracted, config.youtube_api_key, max_results=config.max_videos
-        )
-        print(f"\nFound playlist: {playlist['title']} ({len(video_ids)} videos)")
-        return input_type, f"playlist_{extracted}", playlist["title"], video_ids
+        elif input_type == InputType.PLAYLIST:
+            playlist = get_playlist_info(extracted, config.youtube_api_key)
+            video_ids = get_playlist_video_ids(
+                extracted, config.youtube_api_key, max_results=config.max_videos
+            )
+            print(f"\nFound playlist: {playlist['title']} ({len(video_ids)} videos)")
+            if confirm_selection("Is this correct? [Y/n]: "):
+                return input_type, f"playlist_{extracted}", playlist["title"], video_ids
+            print("\nLet's try again.")
+            continue
 
-    else:
-        channel = find_channel_id(extracted, config.youtube_api_key)
-        print(f"\nFound channel: {channel.title}")
-        print(f"  Subscribers: {channel.subscriber_count:,}")
-        print(f"  Total Videos: {channel.video_count:,}")
-        return input_type, f"channel_{channel.id}", channel.title, []
+        else:
+            channel = find_channel_id(extracted, config.youtube_api_key)
+            print(f"\nFound channel: {channel.title}")
+            print(f"  Subscribers: {channel.subscriber_count:,}")
+            print(f"  Total Videos: {channel.video_count:,}")
+            if confirm_selection("Is this correct? [Y/n]: "):
+                return input_type, f"channel_{channel.id}", channel.title, []
+            print("\nLet's try again.")
+            continue
 
 
 def ask_channel(config: Config) -> ChannelInfo:

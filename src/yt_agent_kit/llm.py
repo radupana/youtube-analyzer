@@ -1,5 +1,6 @@
 """LLM provider abstraction for chat functionality."""
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -8,8 +9,11 @@ from google.genai import types
 
 from .config import LLMConfig
 
-# Cache Gemini clients by API key to avoid recreating on every call
+logger = logging.getLogger(__name__)
+
+DEFAULT_CONTEXT_LIMIT = 32_000
 _gemini_clients: dict[str, genai.Client] = {}
+_context_limit_cache: dict[str, int] = {}
 
 
 class LLMError(Exception):
@@ -27,6 +31,48 @@ def _get_gemini_client(api_key: str) -> genai.Client:
     if api_key not in _gemini_clients:
         _gemini_clients[api_key] = genai.Client(api_key=api_key)
     return _gemini_clients[api_key]
+
+
+def _fetch_gemini_context_limit(config: LLMConfig) -> int | None:
+    """Fetch context limit from Gemini API for the configured model."""
+    try:
+        client = _get_gemini_client(config.api_key)
+        model_info = client.models.get(model=config.model)
+        if hasattr(model_info, "input_token_limit") and model_info.input_token_limit:
+            return int(model_info.input_token_limit)
+    except Exception as e:
+        logger.warning(f"Failed to fetch model info from Gemini API: {e}")
+    return None
+
+
+def get_context_limit(config: LLMConfig) -> int:
+    """Get context limit for the configured model.
+
+    Resolution order:
+    1. Explicit config.context_limit if set
+    2. Cached value for this model
+    3. Fetch from Gemini API (if provider is gemini)
+    4. Conservative default (32,000 tokens)
+    """
+    if config.context_limit is not None:
+        return config.context_limit
+
+    cache_key = f"{config.provider}:{config.model}"
+    if cache_key in _context_limit_cache:
+        return _context_limit_cache[cache_key]
+
+    if config.provider == "gemini":
+        limit = _fetch_gemini_context_limit(config)
+        if limit is not None:
+            _context_limit_cache[cache_key] = limit
+            return limit
+
+    logger.warning(
+        f"Could not determine context limit for {config.provider}/{config.model}, "
+        f"using default {DEFAULT_CONTEXT_LIMIT}. Set llm.context_limit in config to override."
+    )
+    _context_limit_cache[cache_key] = DEFAULT_CONTEXT_LIMIT
+    return DEFAULT_CONTEXT_LIMIT
 
 
 def call_gemini(messages: list[Message], config: LLMConfig) -> str:

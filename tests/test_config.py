@@ -10,6 +10,7 @@ from yt_agent_kit.config import (
     EmbeddingsConfig,
     LLMConfig,
     SearchConfig,
+    TranscriptionConfig,
     load_config,
     resolve_env_vars,
 )
@@ -248,5 +249,109 @@ class TestConfigWithEmbeddings:
             assert config.embeddings.chunk_size == 1500
             assert config.embeddings.chunk_overlap == 250
             assert config.search.top_k == 10
+        finally:
+            config_path.unlink()
+
+
+class TestTranscriptionConfig:
+    def test_defaults(self):
+        config = TranscriptionConfig()
+        assert config.fallback_enabled is True
+        assert config.whisper_model == "base"
+        assert config.cleanup_audio is True
+
+    def test_custom_values(self):
+        config = TranscriptionConfig(
+            fallback_enabled=False, whisper_model="small", cleanup_audio=False
+        )
+        assert config.fallback_enabled is False
+        assert config.whisper_model == "small"
+        assert config.cleanup_audio is False
+
+    def test_valid_whisper_models(self):
+        for model in ["tiny", "base", "small", "medium", "large", "turbo"]:
+            config = TranscriptionConfig(whisper_model=model)
+            assert config.whisper_model == model
+
+    def test_invalid_whisper_model(self):
+        with pytest.raises(ValidationError):
+            TranscriptionConfig(whisper_model="invalid")
+
+
+class TestLLMConfigContextLimit:
+    def test_context_limit_default_is_none(self):
+        config = LLMConfig(
+            provider="gemini",
+            api_key="test-api-key-1234567890",
+            model="gemini-2.5-flash",
+        )
+        assert config.context_limit is None
+
+    def test_context_limit_custom_value(self):
+        config = LLMConfig(
+            provider="gemini",
+            api_key="test-api-key-1234567890",
+            model="gemini-2.5-flash",
+            context_limit=100_000,
+        )
+        assert config.context_limit == 100_000
+
+    def test_context_limit_minimum_validation(self):
+        with pytest.raises(ValidationError):
+            LLMConfig(
+                provider="gemini",
+                api_key="test-api-key-1234567890",
+                model="gemini-2.5-flash",
+                context_limit=500,
+            )
+
+    def test_context_limit_maximum_validation(self):
+        with pytest.raises(ValidationError):
+            LLMConfig(
+                provider="gemini",
+                api_key="test-api-key-1234567890",
+                model="gemini-2.5-flash",
+                context_limit=20_000_000,
+            )
+
+
+class TestConfigWithTranscription:
+    def test_config_includes_transcription_defaults(self):
+        config = Config(
+            llm=LLMConfig(
+                provider="gemini",
+                api_key="test-api-key-1234567890",
+                model="model",
+            ),
+            youtube_api_key="youtube-api-key-1234567890",
+        )
+        assert config.transcription.fallback_enabled is True
+        assert config.transcription.whisper_model == "base"
+        assert config.transcription.cleanup_audio is True
+
+    def test_load_config_with_transcription(self):
+        config_data = {
+            "llm": {
+                "provider": "gemini",
+                "api_key": "test-api-key-1234567890",
+                "model": "gemini-2.0-flash",
+            },
+            "youtube_api_key": "youtube-api-key-1234567890",
+            "transcription": {
+                "fallback_enabled": False,
+                "whisper_model": "small",
+                "cleanup_audio": False,
+            },
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump(config_data, f)
+            config_path = Path(f.name)
+
+        try:
+            config = load_config(config_path)
+            assert config.transcription.fallback_enabled is False
+            assert config.transcription.whisper_model == "small"
+            assert config.transcription.cleanup_audio is False
         finally:
             config_path.unlink()

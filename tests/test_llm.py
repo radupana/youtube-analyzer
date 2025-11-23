@@ -4,15 +4,24 @@ import pytest
 
 from yt_agent_kit import llm
 from yt_agent_kit.config import LLMConfig
-from yt_agent_kit.llm import LLMError, Message, call_gemini, call_llm
+from yt_agent_kit.llm import (
+    DEFAULT_CONTEXT_LIMIT,
+    LLMError,
+    Message,
+    call_gemini,
+    call_llm,
+    get_context_limit,
+)
 
 
 @pytest.fixture(autouse=True)
-def clear_gemini_client_cache():
-    """Clear the Gemini client cache before each test to ensure clean mocking."""
+def clear_caches():
+    """Clear caches before each test to ensure clean mocking."""
     llm._gemini_clients.clear()
+    llm._context_limit_cache.clear()
     yield
     llm._gemini_clients.clear()
+    llm._context_limit_cache.clear()
 
 
 @pytest.fixture
@@ -115,6 +124,80 @@ class TestCallGemini:
             call_args = mock_client.models.generate_content.call_args
             contents = call_args.kwargs.get("contents")
             assert len(contents) == 3
+
+
+class TestGetContextLimit:
+    def test_explicit_config_returns_that_value(self):
+        config = LLMConfig(
+            provider="gemini",
+            api_key="test-api-key-that-is-long-enough",
+            model="gemini-2.5-flash",
+            context_limit=50_000,
+        )
+        result = get_context_limit(config)
+        assert result == 50_000
+
+    def test_gemini_fetches_from_api(self):
+        config = LLMConfig(
+            provider="gemini",
+            api_key="test-api-key-that-is-long-enough",
+            model="gemini-2.5-flash",
+        )
+        with patch("yt_agent_kit.llm.genai") as mock_genai:
+            mock_client = MagicMock()
+            mock_genai.Client.return_value = mock_client
+            mock_model_info = MagicMock()
+            mock_model_info.input_token_limit = 1_000_000
+            mock_client.models.get.return_value = mock_model_info
+
+            result = get_context_limit(config)
+
+            assert result == 1_000_000
+            mock_client.models.get.assert_called_once_with(model="gemini-2.5-flash")
+
+    def test_caches_result(self):
+        config = LLMConfig(
+            provider="gemini",
+            api_key="test-api-key-that-is-long-enough",
+            model="gemini-2.5-flash",
+        )
+        with patch("yt_agent_kit.llm.genai") as mock_genai:
+            mock_client = MagicMock()
+            mock_genai.Client.return_value = mock_client
+            mock_model_info = MagicMock()
+            mock_model_info.input_token_limit = 500_000
+            mock_client.models.get.return_value = mock_model_info
+
+            result1 = get_context_limit(config)
+            result2 = get_context_limit(config)
+
+            assert result1 == 500_000
+            assert result2 == 500_000
+            assert mock_client.models.get.call_count == 1
+
+    def test_non_gemini_returns_default(self):
+        config = LLMConfig(
+            provider="openai",
+            api_key="test-api-key-that-is-long-enough",
+            model="gpt-4",
+        )
+        result = get_context_limit(config)
+        assert result == DEFAULT_CONTEXT_LIMIT
+
+    def test_api_failure_returns_default(self):
+        config = LLMConfig(
+            provider="gemini",
+            api_key="test-api-key-that-is-long-enough",
+            model="gemini-2.5-flash",
+        )
+        with patch("yt_agent_kit.llm.genai") as mock_genai:
+            mock_client = MagicMock()
+            mock_genai.Client.return_value = mock_client
+            mock_client.models.get.side_effect = Exception("API error")
+
+            result = get_context_limit(config)
+
+            assert result == DEFAULT_CONTEXT_LIMIT
 
 
 class TestCallLLM:
