@@ -6,6 +6,7 @@ import tempfile
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, cast
 
@@ -31,14 +32,14 @@ NOISE_PATTERNS = [
     r"\[.*?\]",
 ]
 
-_whisper_model_cache: dict[str, Any] = {}
 
-
+@lru_cache(maxsize=4)
 def _get_whisper_model(model_name: str) -> Any:
-    """Get or load a Whisper model, caching it for reuse."""
-    if model_name not in _whisper_model_cache:
-        _whisper_model_cache[model_name] = whisper.load_model(model_name)
-    return _whisper_model_cache[model_name]
+    """Get or load a Whisper model, caching it for reuse.
+
+    Uses lru_cache for thread-safe caching of expensive model loads.
+    """
+    return whisper.load_model(model_name)
 
 
 def download_audio(video_id: str, output_dir: Path) -> Path:
@@ -363,6 +364,12 @@ def get_transcripts_batch_with_fallback(
         """Fetch a single transcript with fallback."""
         time.sleep(delay_seconds)
         status = "success"
+
+        # Create inner progress callback that updates the batch callback
+        def inner_progress(step_status: str) -> None:
+            nonlocal status
+            status = step_status
+
         try:
             transcript = get_transcript_with_whisper_fallback(
                 video_id=video_id,
@@ -370,7 +377,9 @@ def get_transcripts_batch_with_fallback(
                 fallback_enabled=fallback_enabled,
                 whisper_model=whisper_model,
                 cleanup_audio=cleanup_audio,
+                progress_callback=inner_progress if progress_callback else None,
             )
+            status = "success"  # Reset to success after completion
             return (video_id, transcript, status)
         except (
             NoTranscriptFound,

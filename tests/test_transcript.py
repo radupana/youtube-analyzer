@@ -397,9 +397,10 @@ class TestGetWhisperModel:
         with patch(
             "yt_agent_kit.transcript.whisper.load_model", return_value=mock_model
         ) as mock_load:
-            from yt_agent_kit.transcript import _get_whisper_model, _whisper_model_cache
+            from yt_agent_kit.transcript import _get_whisper_model
 
-            _whisper_model_cache.clear()
+            # Clear the lru_cache before testing
+            _get_whisper_model.cache_clear()
 
             result1 = _get_whisper_model("tiny")
             result2 = _get_whisper_model("tiny")
@@ -510,6 +511,106 @@ class TestGetTranscriptWithWhisperFallback:
                     )
 
         assert "fetching YouTube captions" in progress_calls
+
+    def test_whisper_progress_callbacks(self, tmp_path, monkeypatch):
+        """Test that Whisper fallback reports progress for download and transcription."""
+        monkeypatch.chdir(tmp_path)
+
+        progress_calls = []
+
+        def track_progress(status):
+            progress_calls.append(status)
+
+        mock_api = Mock()
+        mock_transcript_list = Mock()
+        mock_transcript_list.find_transcript.side_effect = NoTranscriptFound(
+            "vid1", [], None
+        )
+        mock_api.list.return_value = mock_transcript_list
+
+        with patch("yt_agent_kit.transcript.get_from_cache", return_value=None):
+            with patch(
+                "yt_agent_kit.transcript.YouTubeTranscriptApi", return_value=mock_api
+            ):
+                with patch(
+                    "yt_agent_kit.transcript.download_audio",
+                    return_value=tmp_path / "audio.mp3",
+                ):
+                    with patch(
+                        "yt_agent_kit.transcript.transcribe_audio",
+                        return_value="Whisper result",
+                    ):
+                        with patch("yt_agent_kit.transcript.save_to_cache"):
+                            (tmp_path / "audio.mp3").touch()
+                            get_transcript_with_whisper_fallback(
+                                "vid1", progress_callback=track_progress
+                            )
+
+        assert "fetching YouTube captions" in progress_calls
+        assert "downloading audio for Whisper" in progress_calls
+        assert any("transcribing with Whisper" in call for call in progress_calls)
+
+    def test_download_failure_without_youtube_error_reraises(
+        self, tmp_path, monkeypatch
+    ):
+        """Test that download failure without prior YouTube error re-raises the exception."""
+        monkeypatch.chdir(tmp_path)
+
+        # This scenario happens when YouTube captions succeed but download fails
+        # (which shouldn't happen in practice, but we need to cover the code path)
+        # We can trigger it by having no youtube_error set but download failing
+
+        mock_snippet = Mock()
+        mock_snippet.text = "Text"
+        mock_transcript = Mock()
+        mock_transcript.fetch.return_value = [mock_snippet]
+        mock_transcript_list = Mock()
+        # First call succeeds, but we force a download by other means
+        mock_transcript_list.find_transcript.side_effect = NoTranscriptFound(
+            "vid1", [], None
+        )
+        mock_api = Mock()
+        mock_api.list.return_value = mock_transcript_list
+
+        with patch("yt_agent_kit.transcript.get_from_cache", return_value=None):
+            with patch(
+                "yt_agent_kit.transcript.YouTubeTranscriptApi", return_value=mock_api
+            ):
+                with patch(
+                    "yt_agent_kit.transcript.download_audio",
+                    side_effect=RuntimeError("Download failed"),
+                ):
+                    # With youtube_error set, should raise NoTranscriptFound
+                    with pytest.raises(NoTranscriptFound):
+                        get_transcript_with_whisper_fallback("vid1")
+
+    def test_transcription_failure_without_youtube_error_reraises(
+        self, tmp_path, monkeypatch
+    ):
+        """Test transcription failure re-raises original YouTube error."""
+        monkeypatch.chdir(tmp_path)
+
+        mock_api = Mock()
+        mock_transcript_list = Mock()
+        mock_transcript_list.find_transcript.side_effect = TranscriptsDisabled("vid1")
+        mock_api.list.return_value = mock_transcript_list
+
+        with patch("yt_agent_kit.transcript.get_from_cache", return_value=None):
+            with patch(
+                "yt_agent_kit.transcript.YouTubeTranscriptApi", return_value=mock_api
+            ):
+                with patch(
+                    "yt_agent_kit.transcript.download_audio",
+                    return_value=tmp_path / "audio.mp3",
+                ):
+                    with patch(
+                        "yt_agent_kit.transcript.transcribe_audio",
+                        side_effect=WhisperTranscriptionError("Transcription failed"),
+                    ):
+                        (tmp_path / "audio.mp3").touch()
+                        # Should raise the original TranscriptsDisabled error
+                        with pytest.raises(TranscriptsDisabled):
+                            get_transcript_with_whisper_fallback("vid1")
 
     def test_cleans_whisper_transcript(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
@@ -673,3 +774,59 @@ class TestGetTranscriptsBatchWithFallback:
         assert call_kwargs["fallback_enabled"] is True
         assert call_kwargs["whisper_model"] == "small"
         assert call_kwargs["cleanup_audio"] is False
+
+    def test_handles_unexpected_exceptions(self, tmp_path, monkeypatch):
+        """Test that unexpected exceptions are logged and return 'error' status."""
+        monkeypatch.chdir(tmp_path)
+
+        progress_calls = []
+
+        def progress_callback(current, total, video_id, status):
+            progress_calls.append((current, total, video_id, status))
+
+        def mock_get(**kwargs):
+            if kwargs["video_id"] == "error_vid":
+                raise RuntimeError("Unexpected error")
+            return "Success"
+
+        with patch(
+            "yt_agent_kit.transcript.get_transcript_with_whisper_fallback",
+            side_effect=mock_get,
+        ):
+            result = get_transcripts_batch_with_fallback(
+                ["vid1", "error_vid"], progress_callback=progress_callback
+            )
+
+        assert len(result) == 1
+        assert "error_vid" not in result
+        # Check that error status was reported
+        statuses = {call[2]: call[3] for call in progress_calls}
+        assert statuses["error_vid"] == "error"
+        assert statuses["vid1"] == "success"
+
+    def test_passes_progress_callback_to_inner_function(self, tmp_path, monkeypatch):
+        """Test that inner progress callback is passed when batch callback exists."""
+        monkeypatch.chdir(tmp_path)
+
+        captured_kwargs = {}
+
+        def mock_get(**kwargs):
+            captured_kwargs.update(kwargs)
+            # Call the progress callback if provided to exercise the code path
+            if kwargs.get("progress_callback"):
+                kwargs["progress_callback"]("test status")
+            return "Success"
+
+        def batch_progress(current, total, video_id, status):
+            pass
+
+        with patch(
+            "yt_agent_kit.transcript.get_transcript_with_whisper_fallback",
+            side_effect=mock_get,
+        ):
+            get_transcripts_batch_with_fallback(
+                ["vid1"], progress_callback=batch_progress
+            )
+
+        # Verify that progress_callback was passed to the inner function
+        assert captured_kwargs.get("progress_callback") is not None

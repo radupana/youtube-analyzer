@@ -448,6 +448,98 @@ class TestAskSource:
         assert "Correct Channel" in captured.out
         assert "Let's try again" in captured.out
 
+    def test_retry_video_on_declined_confirmation(self, config, capsys):
+        """Test that user can retry if they decline video confirmation."""
+        mock_video_wrong = VideoInfo(
+            id="wrong123",
+            title="Wrong Video",
+            description="",
+            published_at="2024-01-01T00:00:00Z",
+            duration="PT10M",
+        )
+        mock_video_correct = VideoInfo(
+            id="correct456",
+            title="Correct Video",
+            description="",
+            published_at="2024-01-01T00:00:00Z",
+            duration="PT15M",
+        )
+
+        # First URL + decline, then second URL + confirm
+        with patch(
+            "builtins.input",
+            side_effect=[
+                "https://youtube.com/watch?v=wrong123",
+                "n",
+                "https://youtube.com/watch?v=correct456",
+                "y",
+            ],
+        ):
+            with patch(
+                "yt_agent_kit.agent.detect_input_type",
+                side_effect=[
+                    (InputType.VIDEO, "wrong123"),
+                    (InputType.VIDEO, "correct456"),
+                ],
+            ):
+                with patch(
+                    "yt_agent_kit.agent.get_video_info",
+                    side_effect=[mock_video_wrong, mock_video_correct],
+                ):
+                    input_type, collection_id, title, video_ids = ask_source(config)
+
+        assert input_type == InputType.VIDEO
+        assert collection_id == "video_correct456"
+        assert title == "Correct Video"
+        assert video_ids == ["correct456"]
+
+        captured = capsys.readouterr()
+        assert "Wrong Video" in captured.out
+        assert "Correct Video" in captured.out
+        assert "Let's try again" in captured.out
+
+    def test_retry_playlist_on_declined_confirmation(self, config, capsys):
+        """Test that user can retry if they decline playlist confirmation."""
+        mock_playlist_wrong = {"title": "Wrong Playlist", "id": "PLwrong"}
+        mock_playlist_correct = {"title": "Correct Playlist", "id": "PLcorrect"}
+
+        # First URL + decline, then second URL + confirm
+        with patch(
+            "builtins.input",
+            side_effect=[
+                "https://youtube.com/playlist?list=PLwrong",
+                "n",
+                "https://youtube.com/playlist?list=PLcorrect",
+                "y",
+            ],
+        ):
+            with patch(
+                "yt_agent_kit.agent.detect_input_type",
+                side_effect=[
+                    (InputType.PLAYLIST, "PLwrong"),
+                    (InputType.PLAYLIST, "PLcorrect"),
+                ],
+            ):
+                with patch(
+                    "yt_agent_kit.agent.get_playlist_info",
+                    side_effect=[mock_playlist_wrong, mock_playlist_correct],
+                ):
+                    with patch(
+                        "yt_agent_kit.agent.get_playlist_video_ids",
+                        side_effect=[["v1", "v2"], ["v3", "v4", "v5"]],
+                    ):
+                        input_type, collection_id, title, video_ids = ask_source(config)
+
+        assert input_type == InputType.PLAYLIST
+        assert collection_id == "playlist_PLcorrect"
+        assert title == "Correct Playlist"
+        assert video_ids == ["v3", "v4", "v5"]
+
+        captured = capsys.readouterr()
+        assert "Wrong Playlist" in captured.out
+        assert "Correct Playlist" in captured.out
+        assert "Let's try again" in captured.out
+
     def test_empty_input_raises_error(self, config):
         with patch("builtins.input", return_value=""):
             with pytest.raises(ValueError, match="Input cannot be empty"):
