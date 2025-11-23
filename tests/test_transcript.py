@@ -10,7 +10,10 @@ from youtube_transcript_api._errors import (
 
 from yt_agent_kit.transcript import (
     MIN_AUDIO_SIZE_BYTES,
+    VALID_VIDEO_ID_PATTERN,
+    WhisperModelLoadError,
     WhisperTranscriptionError,
+    _get_whisper_model,
     clean_transcript,
     download_audio,
     get_transcript,
@@ -288,6 +291,59 @@ class TestGetTranscriptsBatch:
 
         mock_get.assert_called_with("vid1", ["es", "en"])
 
+    def test_logs_warning_on_ip_blocked(self, tmp_path, monkeypatch, caplog):
+        """Test that IpBlocked errors are logged with helpful message."""
+        monkeypatch.chdir(tmp_path)
+
+        def mock_get_transcript(video_id, languages=None):
+            if video_id == "blocked_vid":
+                raise IpBlocked("blocked_vid")
+            return "Has transcript"
+
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            with patch(
+                "yt_agent_kit.transcript.get_transcript",
+                side_effect=mock_get_transcript,
+            ):
+                result = get_transcripts_batch(["vid1", "blocked_vid"])
+
+        assert len(result) == 1
+        assert "blocked_vid" not in result
+        assert "IP blocked" in caplog.text
+        assert "Whisper fallback" in caplog.text
+
+
+class TestVideoIdValidation:
+    def test_valid_video_ids(self):
+        """Test that valid YouTube video IDs pass validation."""
+        valid_ids = [
+            "dQw4w9WgXcQ",  # Standard ID
+            "abc123ABC_-",  # All valid characters
+            "AAAAAAAAAAA",  # All uppercase
+            "aaaaaaaaaaa",  # All lowercase
+            "12345678901",  # All numbers
+            "_-_-_-_-_-_",  # Underscores and dashes
+        ]
+        for video_id in valid_ids:
+            assert VALID_VIDEO_ID_PATTERN.match(video_id), f"{video_id} should be valid"
+
+    def test_invalid_video_ids(self):
+        """Test that invalid video IDs fail validation."""
+        invalid_ids = [
+            "short",  # Too short
+            "waytoolongid",  # Too long
+            "abc123!@#$%",  # Invalid characters
+            "abc 123 xyz",  # Spaces
+            "",  # Empty
+            "abc123ABC_-X",  # 12 characters
+        ]
+        for video_id in invalid_ids:
+            assert not VALID_VIDEO_ID_PATTERN.match(
+                video_id
+            ), f"{video_id} should be invalid"
+
 
 class TestDownloadAudio:
     def test_downloads_audio_successfully(self, tmp_path):
@@ -298,9 +354,9 @@ class TestDownloadAudio:
             mock_ydl.return_value.__enter__.return_value = mock_ydl_instance
             mock_ydl.return_value.__exit__.return_value = None
 
-            result = download_audio("test_video_id", tmp_path)
+            result = download_audio("dQw4w9WgXcQ", tmp_path)
 
-        assert result == tmp_path / "test_video_id.mp3"
+        assert result == tmp_path / "dQw4w9WgXcQ.mp3"
         mock_ydl_instance.download.assert_called_once()
 
     def test_uses_correct_yt_dlp_options(self, tmp_path):
@@ -310,7 +366,7 @@ class TestDownloadAudio:
             mock_ydl.return_value.__enter__.return_value = mock_ydl_instance
             mock_ydl.return_value.__exit__.return_value = None
 
-            download_audio("vid123", tmp_path)
+            download_audio("abc123ABC_-", tmp_path)
 
         call_args = mock_ydl.call_args[0][0]
         assert call_args["format"] == "bestaudio/best"
@@ -318,6 +374,11 @@ class TestDownloadAudio:
         assert any(
             pp["key"] == "FFmpegExtractAudio" for pp in call_args["postprocessors"]
         )
+
+    def test_rejects_invalid_video_id(self, tmp_path):
+        """Test that invalid video IDs are rejected before download."""
+        with pytest.raises(ValueError, match="Invalid YouTube video ID format"):
+            download_audio("invalid!", tmp_path)
 
 
 class TestTranscribeAudio:
@@ -397,8 +458,6 @@ class TestGetWhisperModel:
         with patch(
             "yt_agent_kit.transcript.whisper.load_model", return_value=mock_model
         ) as mock_load:
-            from yt_agent_kit.transcript import _get_whisper_model
-
             # Clear the lru_cache before testing
             _get_whisper_model.cache_clear()
 
@@ -407,6 +466,21 @@ class TestGetWhisperModel:
 
         assert result1 is result2
         mock_load.assert_called_once_with("tiny")
+
+    def test_wraps_load_error_with_descriptive_message(self):
+        """Test that model load errors are wrapped with helpful message."""
+        _get_whisper_model.cache_clear()
+
+        with patch(
+            "yt_agent_kit.transcript.whisper.load_model",
+            side_effect=RuntimeError("CUDA out of memory"),
+        ):
+            with pytest.raises(WhisperModelLoadError) as exc_info:
+                _get_whisper_model("large")
+
+        assert "Failed to load Whisper model 'large'" in str(exc_info.value)
+        assert "CUDA out of memory" in str(exc_info.value)
+        assert "Valid models:" in str(exc_info.value)
 
 
 class TestGetTranscriptWithWhisperFallback:

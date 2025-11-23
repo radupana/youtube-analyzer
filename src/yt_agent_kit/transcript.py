@@ -33,13 +33,31 @@ NOISE_PATTERNS = [
 ]
 
 
+VALID_VIDEO_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{11}$")
+
+
+class WhisperModelLoadError(Exception):
+    """Raised when Whisper model fails to load."""
+
+    pass
+
+
 @lru_cache(maxsize=4)
 def _get_whisper_model(model_name: str) -> Any:
     """Get or load a Whisper model, caching it for reuse.
 
     Uses lru_cache for thread-safe caching of expensive model loads.
+
+    Raises:
+        WhisperModelLoadError: If model loading fails (invalid name, OOM, etc.)
     """
-    return whisper.load_model(model_name)
+    try:
+        return whisper.load_model(model_name)
+    except Exception as e:
+        raise WhisperModelLoadError(
+            f"Failed to load Whisper model '{model_name}': {e}. "
+            f"Valid models: tiny, base, small, medium, large, turbo"
+        ) from e
 
 
 def download_audio(video_id: str, output_dir: Path) -> Path:
@@ -54,8 +72,12 @@ def download_audio(video_id: str, output_dir: Path) -> Path:
         Path to the downloaded audio file
 
     Raises:
+        ValueError: If video_id format is invalid
         yt_dlp.utils.DownloadError: If download fails
     """
+    if not VALID_VIDEO_ID_PATTERN.match(video_id):
+        raise ValueError(f"Invalid YouTube video ID format: {video_id}")
+
     url = f"https://www.youtube.com/watch?v={video_id}"
     output_template = str(output_dir / f"{video_id}.%(ext)s")
 
@@ -308,7 +330,13 @@ def get_transcripts_batch(
         time.sleep(delay_seconds)  # Rate limiting
         try:
             return (video_id, get_transcript(video_id, languages))
-        except (NoTranscriptFound, TranscriptsDisabled, VideoUnavailable, IpBlocked):
+        except IpBlocked:
+            logger.warning(
+                "IP blocked by YouTube for video %s - consider using Whisper fallback",
+                video_id,
+            )
+            return (video_id, None)
+        except (NoTranscriptFound, TranscriptsDisabled, VideoUnavailable):
             return (video_id, None)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
