@@ -14,6 +14,7 @@ class LLMConfig(BaseModel):
     provider: str = Field(..., pattern="^(gemini|openai|anthropic|custom)$")
     api_key: str = Field(..., min_length=20)
     model: str = Field(..., min_length=1)
+    context_limit: int | None = Field(default=None, ge=1000, le=10_000_000)
 
 
 class EmbeddingsConfig(BaseModel):
@@ -26,6 +27,14 @@ class SearchConfig(BaseModel):
     top_k: int = Field(default=8, ge=1, le=50)
 
 
+class TranscriptionConfig(BaseModel):
+    fallback_enabled: bool = Field(default=True)
+    whisper_model: str = Field(
+        default="base", pattern="^(tiny|base|small|medium|large|turbo)$"
+    )
+    cleanup_audio: bool = Field(default=True)
+
+
 class Config(BaseModel):
     llm: LLMConfig
     youtube_api_key: str = Field(..., min_length=20)
@@ -33,6 +42,7 @@ class Config(BaseModel):
     max_videos: int = Field(default=50, ge=1, le=1000)
     embeddings: EmbeddingsConfig = Field(default_factory=EmbeddingsConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
+    transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
 
 
 def resolve_env_vars(value: Any, depth: int = 0, max_depth: int = 100) -> Any:

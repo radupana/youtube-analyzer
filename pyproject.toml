@@ -27,9 +27,9 @@ dependencies = [
     "requests>=2.31.0",
     "chromadb>=0.4.0",
     "sentence-transformers>=2.2.0",
-    # google-genai is Google's new unified AI SDK (replaces google-generativeai)
-    # See: https://github.com/googleapis/python-genai
     "google-genai>=1.0.0",
+    "yt-dlp>=2024.0.0",
+    "openai-whisper>=20240930",
 ]
 
 [project.optional-dependencies]
@@ -101,6 +101,8 @@ module = [
     "sentence_transformers",
     "google",
     "google.*",
+    "whisper",
+    "yt_dlp",
 ]
 ignore_missing_imports = true
 

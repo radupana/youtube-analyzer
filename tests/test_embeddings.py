@@ -128,6 +128,25 @@ class TestBuildIndex:
         result = build_index("channel1", new_transcripts)
         assert result == 1
 
+    def test_large_index_batches_chromadb_adds(self, temp_index_dir):
+        """Test that large datasets are batched to avoid ChromaDB's max batch size limit."""
+        # Create enough transcripts to generate >5000 chunks
+        # With chunk_size=100 and no overlap, 600 chars = 6 chunks per video
+        # 1000 videos * 6 chunks = 6000 chunks (exceeds 5461 limit)
+        transcripts = {
+            f"vid{i}": (f"Video {i}", f"Content for video {i}. " * 30)
+            for i in range(1000)
+        }
+        # Should not raise chromadb.errors.InternalError about batch size
+        result = build_index(
+            "large_channel", transcripts, chunk_size=100, chunk_overlap=0
+        )
+        assert result == 1000
+
+        stats = get_index_stats("large_channel")
+        assert stats["total_videos"] == 1000
+        assert stats["total_chunks"] > 5000
+
 
 class TestSearch:
     def test_search_empty_index_returns_empty(self, temp_index_dir):

@@ -72,23 +72,12 @@ class TestMain:
                     return_value={"abc123": mock_video_info},
                 ):
                     with patch(
-                        "yt_agent_kit.transcript.get_transcripts_batch",
+                        "yt_agent_kit.transcript.get_transcripts_batch_with_fallback",
                         return_value={"abc123": "transcript text"},
                     ):
-                        with patch(
-                            "yt_agent_kit.embeddings.build_index", return_value=1
-                        ):
-                            with patch(
-                                "yt_agent_kit.embeddings.get_index_stats",
-                                return_value={
-                                    "total_chunks": 5,
-                                    "total_videos": 1,
-                                    "index_size_mb": 0.1,
-                                },
-                            ):
-                                with patch("builtins.input", side_effect=["quit"]):
-                                    with patch("sys.argv", ["yt_agent_kit"]):
-                                        exit_code = main()
+                        with patch("builtins.input", side_effect=["quit"]):
+                            with patch("sys.argv", ["yt_agent_kit"]):
+                                exit_code = main()
 
         assert exit_code == 0
 
@@ -128,32 +117,21 @@ class TestMain:
                     return_value={"abc123": mock_video_info},
                 ):
                     with patch(
-                        "yt_agent_kit.transcript.get_transcripts_batch",
+                        "yt_agent_kit.transcript.get_transcripts_batch_with_fallback",
                         return_value={"abc123": "transcript text"},
                     ):
-                        with patch(
-                            "yt_agent_kit.embeddings.build_index", return_value=1
-                        ):
+                        with patch("builtins.input", side_effect=["quit"]):
                             with patch(
-                                "yt_agent_kit.embeddings.get_index_stats",
-                                return_value={
-                                    "total_chunks": 5,
-                                    "total_videos": 1,
-                                    "index_size_mb": 0.1,
-                                },
+                                "sys.argv",
+                                [
+                                    "yt_agent_kit",
+                                    "--max-videos",
+                                    "10",
+                                    "--output",
+                                    "test.json",
+                                ],
                             ):
-                                with patch("builtins.input", side_effect=["quit"]):
-                                    with patch(
-                                        "sys.argv",
-                                        [
-                                            "yt_agent_kit",
-                                            "--max-videos",
-                                            "10",
-                                            "--output",
-                                            "test.json",
-                                        ],
-                                    ):
-                                        exit_code = main()
+                                exit_code = main()
 
         assert exit_code == 0
 
@@ -183,26 +161,13 @@ class TestMain:
                     "yt_agent_kit.youtube.list_videos", return_value=[mock_video]
                 ):
                     with patch(
-                        "yt_agent_kit.transcript.get_transcripts_batch",
+                        "yt_agent_kit.transcript.get_transcripts_batch_with_fallback",
                         return_value={"vid1": "transcript"},
                     ):
-                        with patch(
-                            "yt_agent_kit.embeddings.build_index", return_value=1
-                        ):
-                            with patch(
-                                "yt_agent_kit.embeddings.get_index_stats",
-                                return_value={
-                                    "total_chunks": 5,
-                                    "total_videos": 1,
-                                    "index_size_mb": 0.1,
-                                },
-                            ):
-                                # "abc" is invalid, should default to 50
-                                with patch(
-                                    "builtins.input", side_effect=["abc", "quit"]
-                                ):
-                                    with patch("sys.argv", ["yt_agent_kit"]):
-                                        exit_code = main()
+                        # "abc" is invalid, should default to 50
+                        with patch("builtins.input", side_effect=["abc", "quit"]):
+                            with patch("sys.argv", ["yt_agent_kit"]):
+                                exit_code = main()
 
         assert exit_code == 0
 
@@ -234,26 +199,13 @@ class TestMain:
                     "yt_agent_kit.youtube.list_videos", return_value=[mock_video]
                 ):
                     with patch(
-                        "yt_agent_kit.transcript.get_transcripts_batch",
+                        "yt_agent_kit.transcript.get_transcripts_batch_with_fallback",
                         return_value={"vid1": "transcript"},
                     ):
-                        with patch(
-                            "yt_agent_kit.embeddings.build_index", return_value=1
-                        ):
-                            with patch(
-                                "yt_agent_kit.embeddings.get_index_stats",
-                                return_value={
-                                    "total_chunks": 5,
-                                    "total_videos": 1,
-                                    "index_size_mb": 0.1,
-                                },
-                            ):
-                                # -5 is negative, should default to 50
-                                with patch(
-                                    "builtins.input", side_effect=["-5", "quit"]
-                                ):
-                                    with patch("sys.argv", ["yt_agent_kit"]):
-                                        exit_code = main()
+                        # -5 is negative, should default to 50
+                        with patch("builtins.input", side_effect=["-5", "quit"]):
+                            with patch("sys.argv", ["yt_agent_kit"]):
+                                exit_code = main()
 
         assert exit_code == 0
         captured = capsys.readouterr()
@@ -288,23 +240,12 @@ class TestMain:
                     return_value={},
                 ):
                     with patch(
-                        "yt_agent_kit.transcript.get_transcripts_batch",
+                        "yt_agent_kit.transcript.get_transcripts_batch_with_fallback",
                         return_value={"abc123": "transcript text"},
                     ):
-                        with patch(
-                            "yt_agent_kit.embeddings.build_index", return_value=1
-                        ):
-                            with patch(
-                                "yt_agent_kit.embeddings.get_index_stats",
-                                return_value={
-                                    "total_chunks": 5,
-                                    "total_videos": 1,
-                                    "index_size_mb": 0.1,
-                                },
-                            ):
-                                with patch("builtins.input", side_effect=["quit"]):
-                                    with patch("sys.argv", ["yt_agent_kit"]):
-                                        exit_code = main()
+                        with patch("builtins.input", side_effect=["quit"]):
+                            with patch("sys.argv", ["yt_agent_kit"]):
+                                exit_code = main()
 
         assert exit_code == 0
 
@@ -333,25 +274,12 @@ class TestMain:
                     "yt_agent_kit.youtube.list_videos", return_value=[mock_video]
                 ):
                     with patch(
-                        "yt_agent_kit.transcript.get_transcripts_batch",
+                        "yt_agent_kit.transcript.get_transcripts_batch_with_fallback",
                         return_value={"vid1": "transcript"},
                     ):
-                        with patch(
-                            "yt_agent_kit.embeddings.build_index", return_value=1
-                        ):
-                            with patch(
-                                "yt_agent_kit.embeddings.get_index_stats",
-                                return_value={
-                                    "total_chunks": 5,
-                                    "total_videos": 1,
-                                    "index_size_mb": 0.1,
-                                },
-                            ):
-                                with patch(
-                                    "builtins.input", side_effect=["10", "quit"]
-                                ):
-                                    with patch("sys.argv", ["yt_agent_kit"]):
-                                        exit_code = main()
+                        with patch("builtins.input", side_effect=["10", "quit"]):
+                            with patch("sys.argv", ["yt_agent_kit"]):
+                                exit_code = main()
 
         assert exit_code == 0
 
@@ -390,7 +318,7 @@ class TestMain:
                     return_value={"abc123": mock_video_info},
                 ):
                     with patch(
-                        "yt_agent_kit.transcript.get_transcripts_batch",
+                        "yt_agent_kit.transcript.get_transcripts_batch_with_fallback",
                         return_value={},
                     ):
                         with patch("sys.argv", ["yt_agent_kit"]):

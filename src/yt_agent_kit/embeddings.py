@@ -140,7 +140,16 @@ def build_index(
         for c in all_chunks
     ]
 
-    collection.add(ids=ids, embeddings=embeddings, documents=texts, metadatas=metadatas)
+    # ChromaDB has a max batch size limit (~5461), so batch the adds
+    batch_size = 5000
+    for i in range(0, len(ids), batch_size):
+        end = i + batch_size
+        collection.add(
+            ids=ids[i:end],
+            embeddings=embeddings[i:end],
+            documents=texts[i:end],
+            metadatas=metadatas[i:end],
+        )
 
     return len(new_transcripts)
 

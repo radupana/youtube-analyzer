@@ -76,8 +76,8 @@ Examples:
 
         from .agent import ask_source, parse_video_count
         from .chat import ChatSession
-        from .embeddings import build_index, get_index_stats
-        from .transcript import get_transcripts_batch
+        from .llm import get_context_limit
+        from .transcript import get_transcripts_batch_with_fallback
         from .youtube import InputType, get_videos_batch, list_videos
 
         logger.info("Starting conversational agent")
@@ -107,12 +107,25 @@ Examples:
                     video_titles[vid] = vid  # Fallback to ID if fetch fails
 
         print(f"\nFetching transcripts for {len(video_ids)} videos...")
+        if config.transcription.fallback_enabled:
+            print(
+                f"(Whisper fallback enabled with '{config.transcription.whisper_model}' model)"
+            )
 
-        def show_progress(current: int, total: int, video_id: str) -> None:
+        def show_progress(current: int, total: int, video_id: str, status: str) -> None:
             percentage = int((current / total) * 100) if total > 0 else 0
-            print(f"Progress: {current}/{total} ({percentage}%) - {video_id}")
+            status_str = f" [{status}]" if status != "success" else ""
+            print(
+                f"Progress: {current}/{total} ({percentage}%) - {video_id}{status_str}"
+            )
 
-        transcripts = get_transcripts_batch(video_ids, progress_callback=show_progress)
+        transcripts = get_transcripts_batch_with_fallback(
+            video_ids,
+            progress_callback=show_progress,
+            fallback_enabled=config.transcription.fallback_enabled,
+            whisper_model=config.transcription.whisper_model,
+            cleanup_audio=config.transcription.cleanup_audio,
+        )
 
         skipped = len(video_ids) - len(transcripts)
         print(
@@ -123,20 +136,13 @@ Examples:
         if not transcripts:
             raise ValueError("No transcripts available for the selected content")
 
-        print("\nBuilding search index...")
-        transcripts_for_index = {
-            vid: (video_titles.get(vid, vid), text) for vid, text in transcripts.items()
-        }
-        added = build_index(collection_id, transcripts_for_index)
-        stats = get_index_stats(collection_id)
+        context_limit = get_context_limit(config.llm)
+        total_chars = sum(len(t) for t in transcripts.values())
         logger.info(
-            "Index built: added=%d, total_chunks=%d, total_videos=%d",
-            added,
-            stats["total_chunks"],
-            stats["total_videos"],
-        )
-        print(
-            f"Indexed {stats['total_videos']} videos ({stats['total_chunks']} chunks)"
+            "Transcripts: %d chars (~%d tokens), context_limit: %d tokens",
+            total_chars,
+            total_chars // 4,
+            context_limit,
         )
 
         print("\n" + "=" * 60)
@@ -149,7 +155,11 @@ Examples:
         session = ChatSession(
             collection_id=collection_id,
             llm_config=config.llm,
+            transcripts=transcripts,
+            video_titles=video_titles,
+            context_limit=context_limit,
             search_config=config.search,
+            embeddings_config=config.embeddings,
         )
 
         while True:

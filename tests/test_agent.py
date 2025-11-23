@@ -9,6 +9,7 @@ from yt_agent_kit.agent import (
     ask_output_format,
     ask_source,
     ask_video_count,
+    confirm_selection,
     parse_video_count,
     run_conversation,
 )
@@ -300,6 +301,28 @@ class TestRunConversation:
         assert state.output_format == "human"
 
 
+class TestConfirmSelection:
+    def test_yes_response(self):
+        with patch("builtins.input", return_value="yes"):
+            assert confirm_selection("Confirm? ") is True
+
+    def test_y_response(self):
+        with patch("builtins.input", return_value="y"):
+            assert confirm_selection("Confirm? ") is True
+
+    def test_empty_response_defaults_to_yes(self):
+        with patch("builtins.input", return_value=""):
+            assert confirm_selection("Confirm? ") is True
+
+    def test_no_response(self):
+        with patch("builtins.input", return_value="n"):
+            assert confirm_selection("Confirm? ") is False
+
+    def test_other_response(self):
+        with patch("builtins.input", return_value="maybe"):
+            assert confirm_selection("Confirm? ") is False
+
+
 class TestAskSource:
     def test_video_url_input(self, config, capsys):
         mock_video = VideoInfo(
@@ -310,7 +333,10 @@ class TestAskSource:
             duration="PT10M",
         )
 
-        with patch("builtins.input", return_value="https://youtube.com/watch?v=abc123"):
+        # First input is the URL, second is confirmation (empty = yes)
+        with patch(
+            "builtins.input", side_effect=["https://youtube.com/watch?v=abc123", ""]
+        ):
             with patch(
                 "yt_agent_kit.agent.detect_input_type",
                 return_value=(InputType.VIDEO, "abc123"),
@@ -331,9 +357,10 @@ class TestAskSource:
     def test_playlist_url_input(self, config, capsys):
         mock_playlist = {"title": "Test Playlist", "id": "PLtest123"}
 
+        # First input is the URL, second is confirmation
         with patch(
             "builtins.input",
-            return_value="https://youtube.com/playlist?list=PLtest123",
+            side_effect=["https://youtube.com/playlist?list=PLtest123", "y"],
         ):
             with patch(
                 "yt_agent_kit.agent.detect_input_type",
@@ -363,7 +390,8 @@ class TestAskSource:
         mock_channel.subscriber_count = 1000000
         mock_channel.video_count = 500
 
-        with patch("builtins.input", return_value="@testchannel"):
+        # First input is the handle, second is confirmation
+        with patch("builtins.input", side_effect=["@testchannel", "yes"]):
             with patch(
                 "yt_agent_kit.agent.detect_input_type",
                 return_value=(InputType.CHANNEL, "@testchannel"),
@@ -381,6 +409,44 @@ class TestAskSource:
         captured = capsys.readouterr()
         assert "Found channel: Test Channel" in captured.out
         assert "Subscribers: 1,000,000" in captured.out
+
+    def test_retry_on_declined_confirmation(self, config, capsys):
+        """Test that user can retry if they decline the confirmation."""
+        mock_channel_wrong = Mock()
+        mock_channel_wrong.id = "UC_wrong"
+        mock_channel_wrong.title = "Wrong Channel"
+        mock_channel_wrong.subscriber_count = 100
+        mock_channel_wrong.video_count = 10
+
+        mock_channel_correct = Mock()
+        mock_channel_correct.id = "UC_correct"
+        mock_channel_correct.title = "Correct Channel"
+        mock_channel_correct.subscriber_count = 1000000
+        mock_channel_correct.video_count = 500
+
+        # First search + decline, then second search + confirm
+        with patch(
+            "builtins.input",
+            side_effect=["Ben Johnsn", "n", "Ben Johnson", "y"],
+        ):
+            with patch(
+                "yt_agent_kit.agent.detect_input_type",
+                return_value=(InputType.CHANNEL, "search_query"),
+            ):
+                with patch(
+                    "yt_agent_kit.agent.find_channel_id",
+                    side_effect=[mock_channel_wrong, mock_channel_correct],
+                ):
+                    input_type, collection_id, title, video_ids = ask_source(config)
+
+        assert input_type == InputType.CHANNEL
+        assert collection_id == "channel_UC_correct"
+        assert title == "Correct Channel"
+
+        captured = capsys.readouterr()
+        assert "Wrong Channel" in captured.out
+        assert "Correct Channel" in captured.out
+        assert "Let's try again" in captured.out
 
     def test_empty_input_raises_error(self, config):
         with patch("builtins.input", return_value=""):
