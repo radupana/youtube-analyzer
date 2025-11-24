@@ -120,4 +120,4 @@ The context window is auto-detected from Gemini's API. Override via `llm.context
 
 ## License
 
-MIT
+Apache 2.0
