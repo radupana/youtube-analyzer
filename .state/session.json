@@ -1,0 +1,24 @@
+{
+  "loaded_videos": [
+    "video1"
+  ],
+  "chat_history": [
+    {
+      "role": "user",
+      "content": "What is this video about?"
+    },
+    {
+      "role": "assistant",
+      "content": "This is the response"
+    }
+  ],
+  "video_metadata": {
+    "video1": {
+      "id": "video1",
+      "title": "Test Video",
+      "description": "",
+      "published_at": "2024-01-01",
+      "duration": "PT10M"
+    }
+  }
+}
