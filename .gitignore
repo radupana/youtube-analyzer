@@ -224,6 +224,7 @@ config.yaml
 results/
 .cache/
 .checkpoints/
+.state/
 .index/
 chroma/
 
