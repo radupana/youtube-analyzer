@@ -14,8 +14,9 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
+!frontend/lib/
 parts/
 sdist/
 var/
@@ -213,20 +214,32 @@ __marimo__/
 .DS_Store
 
 # Project documentation (private)
-plan.md
-CLAUDE.md
-GEMINI.md
+*.md
 
 # Project specific
 config.yaml
-*.json
+!frontend/**/*.json
+!backend/**/*.json
 !tests/fixtures/*.json
 results/
 .cache/
 .checkpoints/
+.state/
 .index/
 chroma/
 
 # Local development
 *.local
 .env.local
+
+# Next.js
+frontend/.next/
+frontend/out/
+frontend/node_modules/
+frontend/package-lock.json
+
+# Backend
+backend/.venv/
+backend/__pycache__/
+backend/*.db
+backend/.env
