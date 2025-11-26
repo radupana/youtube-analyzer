@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 class CacheService:
     def __init__(self):
         self.settings = get_settings()
-        self.cache_dir = "/app/.cache"
+        # Use CACHE_DIR env var, or default to .cache in current directory
+        self.cache_dir = os.environ.get("CACHE_DIR", ".cache")
         self.videos_cache_dir = os.path.join(self.cache_dir, "videos")
         self.transcripts_cache_dir = os.path.join(self.cache_dir, "transcripts")
 

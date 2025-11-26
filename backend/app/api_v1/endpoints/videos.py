@@ -1,4 +1,4 @@
-"""Video management endpoints with real YouTube integration."""
+"""Video management endpoints - single video only."""
 
 import asyncio
 import logging
@@ -29,17 +29,37 @@ cache_service = get_cache_service()
 # Progress tracking
 task_progress: dict[str, dict] = {}
 
+# Error message for unsupported URL types
+UNSUPPORTED_URL_ERROR = (
+    "Only single video URLs are supported. "
+    "Please provide a URL in the format https://www.youtube.com/watch?v=..."
+)
+
 
 @router.post("/add", response_model=TaskResponse)
-async def add_videos(video_request: VideoCreate, background_tasks: BackgroundTasks):
-    """Add YouTube videos, channels, or playlists to the context."""
+async def add_video(video_request: VideoCreate, background_tasks: BackgroundTasks):
+    """Add a single YouTube video to the context."""
+    url = video_request.url
+
+    # Validate URL type - reject channels and playlists
+    if youtube_service.is_channel_url(url):
+        raise HTTPException(status_code=400, detail=UNSUPPORTED_URL_ERROR)
+
+    if youtube_service.is_playlist_url(url):
+        raise HTTPException(status_code=400, detail=UNSUPPORTED_URL_ERROR)
+
+    # Extract video ID
+    video_id = youtube_service.extract_video_id(url)
+    if not video_id:
+        raise HTTPException(status_code=400, detail=UNSUPPORTED_URL_ERROR)
+
     task_id = str(uuid4())
 
     # Initialize progress tracking
     task_progress[task_id] = {
         "status": TaskStatus.PENDING,
         "progress": 0.0,
-        "total": 0,
+        "total": 1,
         "processed": 0,
         "message": "Starting...",
         "videos_added": [],
@@ -50,13 +70,7 @@ async def add_videos(video_request: VideoCreate, background_tasks: BackgroundTas
     }
 
     # Process in background
-    background_tasks.add_task(
-        process_video_request,
-        task_id,
-        video_request.url,
-        video_request.max_videos,
-        video_request.load_transcripts,
-    )
+    background_tasks.add_task(process_single_video, task_id, video_id)
 
     return TaskResponse(
         task_id=task_id,
@@ -70,240 +84,152 @@ async def get_task_status(task_id: str):
     """Get the status of a video loading task."""
     if task_id not in task_progress:
         raise HTTPException(status_code=404, detail="Task not found")
-    return task_progress[task_id]
+
+    progress = task_progress[task_id]
+
+    # Always compute fresh elapsed time for smooth timer updates
+    if progress["status"] not in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+        progress["elapsed_time"] = int(time.time() - progress["start_time"])
+
+    return progress
 
 
-async def process_video_request(
-    task_id: str, url: str, max_videos: int = 50, load_transcripts: bool = True
-):
-    """Process a YouTube URL and add videos to the context."""
+async def process_single_video(task_id: str, video_id: str):
+    """Process a single YouTube video."""
     try:
         task_progress[task_id]["status"] = TaskStatus.RUNNING
-        task_progress[task_id]["message"] = "Initializing..."
-        task_progress[task_id]["current_step"] = "discovery"
-        task_progress[task_id][
-            "progress"
-        ] = 5.0  # Start with 5% to show something immediately
+        task_progress[task_id]["message"] = "Loading video..."
+        task_progress[task_id]["progress"] = 10.0
 
         # Small delay to ensure UI can fetch initial progress
         await asyncio.sleep(0.1)
 
-        task_progress[task_id]["message"] = "Fetching video list..."
-        video_ids = []
+        # Check if already loaded
+        if video_id in loaded_videos:
+            task_progress[task_id]["status"] = TaskStatus.COMPLETED
+            task_progress[task_id]["progress"] = 100.0
+            task_progress[task_id]["message"] = "Video already loaded."
+            task_progress[task_id]["videos_added"].append(video_id)
+            return
 
-        # Determine URL type and extract IDs
-        if video_id := youtube_service.extract_video_id(url):
-            video_ids = [video_id]
-            task_progress[task_id]["message"] = "Processing single video..."
-        elif channel_id := youtube_service.extract_channel_id(url):
-            task_progress[task_id][
-                "message"
-            ] = f"Fetching channel videos (max {max_videos})..."
-            video_ids = youtube_service.get_channel_videos(channel_id, max_videos)
-        elif playlist_id := youtube_service.extract_playlist_id(url):
-            task_progress[task_id][
-                "message"
-            ] = f"Fetching playlist videos (max {max_videos})..."
-            video_ids = youtube_service.get_playlist_videos(playlist_id, max_videos)
-        else:
-            # Try to search for the URL as a channel name
-            task_progress[task_id]["message"] = f"Searching for channel: {url}..."
-            video_ids = youtube_service.get_channel_videos(url, max_videos)
+        # Check cache first
+        cached_video = cache_service.load_video(video_id)
+        if cached_video:
+            task_progress[task_id]["current_step"] = "cache"
+            task_progress[task_id]["message"] = "Loading from cache..."
+            task_progress[task_id]["progress"] = 50.0
 
-        task_progress[task_id]["total"] = len(video_ids)
-        task_progress[task_id]["progress"] = 10.0  # 10% after discovery
+            video = Video(**cached_video)
+            loaded_videos[video_id] = video
+            task_progress[task_id]["videos_added"].append(video_id)
+            task_progress[task_id]["current_video"] = (
+                video.title[:50] + "..." if len(video.title) > 50 else video.title
+            )
 
-        if len(video_ids) == 1:
-            task_progress[task_id]["message"] = "Loading video metadata..."
-        else:
-            task_progress[task_id][
-                "message"
-            ] = f"Found {len(video_ids)} videos. Loading metadata..."
+            task_progress[task_id]["status"] = TaskStatus.COMPLETED
+            task_progress[task_id]["progress"] = 100.0
+            task_progress[task_id]["message"] = f"Loaded from cache: {video.title}"
+            task_progress[task_id]["processed"] = 1
+            return
 
-        # Process videos with rate limiting
-        for idx, vid_id in enumerate(video_ids):
-            # Update elapsed time
+        # Fetch from YouTube
+        task_progress[task_id]["current_step"] = "metadata"
+        task_progress[task_id]["message"] = "Fetching video metadata..."
+        task_progress[task_id]["progress"] = 20.0
+
+        video_info = await asyncio.to_thread(youtube_service.get_video_info, video_id)
+        if not video_info:
+            task_progress[task_id]["status"] = TaskStatus.FAILED
+            task_progress[task_id]["message"] = "Video not found or unavailable."
+            return
+
+        task_progress[task_id]["current_video"] = (
+            video_info["title"][:50] + "..."
+            if len(video_info["title"]) > 50
+            else video_info["title"]
+        )
+        task_progress[task_id]["progress"] = 30.0
+
+        # Create video object
+        video = Video(
+            id=video_id,
+            title=video_info["title"],
+            channel_id=video_info["channel_id"],
+            channel_title=video_info["channel_title"],
+            duration=video_info["duration"],
+            published_at=video_info["published_at"],
+            status=VideoStatus.PROCESSING,
+            transcript="",
+            description=video_info.get("description", ""),
+            view_count=video_info.get("view_count", 0),
+            like_count=video_info.get("like_count", 0),
+        )
+
+        loaded_videos[video_id] = video
+        task_progress[task_id]["videos_added"].append(video_id)
+
+        # Get transcript
+        task_progress[task_id]["current_step"] = "transcript"
+        task_progress[task_id]["message"] = "Fetching transcript..."
+        task_progress[task_id]["progress"] = 40.0
+
+        # Create progress callback for Whisper
+        def whisper_progress(step: str, message: str):
+            task_progress[task_id]["current_step"] = step
+            task_progress[task_id]["message"] = message
             task_progress[task_id]["elapsed_time"] = int(
                 time.time() - task_progress[task_id]["start_time"]
             )
+            # Update progress based on whisper step
+            if step == "whisper_downloading":
+                task_progress[task_id]["progress"] = 50.0
+            elif step == "whisper_loading":
+                task_progress[task_id]["progress"] = 60.0
+            elif step == "whisper_transcribing":
+                task_progress[task_id]["progress"] = 70.0
 
-            if vid_id not in loaded_videos:
-                # Check cache first
-                cached_video = cache_service.load_video(vid_id)
+        # Run the blocking transcript fetch in a thread to not block the event loop
+        # This allows progress polling to work during Whisper transcription
+        transcript, source = await asyncio.to_thread(
+            youtube_service.get_transcript, video_id, None, whisper_progress
+        )
 
-                if cached_video:
-                    # Load from cache
-                    task_progress[task_id]["current_step"] = "cache"
-                    task_progress[task_id][
-                        "message"
-                    ] = f"Loading from cache: video {idx + 1}/{len(video_ids)}..."
+        if transcript:
+            video.transcript = transcript
+            video.transcript_source = source
+            video.status = VideoStatus.READY
+            task_progress[task_id]["progress"] = 90.0
 
-                    video = Video(**cached_video)
-                    loaded_videos[vid_id] = video
-                    task_progress[task_id]["videos_added"].append(vid_id)
-                    task_progress[task_id]["current_video"] = (
-                        video.title[:50] + "..."
-                        if len(video.title) > 50
-                        else video.title
-                    )
-
-                    # Small delay to show cache loading
-                    await asyncio.sleep(0.1)
-                else:
-                    # Not in cache, fetch from YouTube
-                    task_progress[task_id]["current_step"] = "metadata"
-                    task_progress[task_id][
-                        "message"
-                    ] = f"Loading metadata for video {idx + 1}/{len(video_ids)}..."
-
-                    # Get video metadata
-                    video_info = youtube_service.get_video_info(vid_id)
-                    if video_info:
-                        task_progress[task_id]["current_video"] = (
-                            video_info["title"][:50] + "..."
-                            if len(video_info["title"]) > 50
-                            else video_info["title"]
-                        )
-
-                        # Create video with pending transcript status first
-                        video = Video(
-                            id=vid_id,
-                            title=video_info["title"],
-                            channel_id=video_info["channel_id"],
-                            channel_title=video_info["channel_title"],
-                            duration=video_info["duration"],
-                            published_at=video_info["published_at"],
-                            status=VideoStatus.PROCESSING,
-                            transcript="",
-                            description=video_info.get("description", ""),
-                            view_count=video_info.get("view_count", 0),
-                            like_count=video_info.get("like_count", 0),
-                        )
-
-                        loaded_videos[vid_id] = video
-                        task_progress[task_id]["videos_added"].append(vid_id)
-
-                    # Only load transcripts if requested
-                    if load_transcripts:
-                        # Update step
-                        task_progress[task_id]["current_step"] = "transcript"
-                        task_progress[task_id][
-                            "message"
-                        ] = f"Getting transcript for video {idx + 1}/{len(video_ids)}..."
-
-                        # Add delay to avoid rate limiting (429 errors)
-                        # Use exponential backoff after failures
-                        delay = 3.0 if idx < 5 else 5.0 if idx < 10 else 8.0
-                        if idx > 0:
-                            task_progress[task_id]["current_step"] = "rate_limit"
-                            task_progress[task_id][
-                                "message"
-                            ] = f"Waiting {delay}s to avoid rate limits... (video {idx + 1}/{len(video_ids)})"
-                            await asyncio.sleep(delay)
-
-                        # Update status before transcript attempt
-                        task_progress[task_id]["current_step"] = "transcript"
-
-                        # Create progress callback for Whisper
-                        def whisper_progress(step, message):
-                            task_progress[task_id]["current_step"] = step
-                            task_progress[task_id]["message"] = message
-                            task_progress[task_id]["elapsed_time"] = int(
-                                time.time() - task_progress[task_id]["start_time"]
-                            )
-
-                        transcript, source = youtube_service.get_transcript(
-                            vid_id, progress_callback=whisper_progress
-                        )
-
-                        if transcript:
-                            video.transcript = transcript
-                            video.transcript_source = source
-                            video.status = VideoStatus.READY
-
-                            # Update progress message to indicate source
-                            if source == "whisper":
-                                task_progress[task_id]["current_step"] = "whisper"
-                                task_progress[task_id][
-                                    "message"
-                                ] = f"Transcribed with Whisper: {task_progress[task_id]['current_video']}"
-                            else:
-                                task_progress[task_id][
-                                    "message"
-                                ] = f"Got YouTube captions for video {idx + 1}/{len(video_ids)}"
-
-                            # Save to cache
-                            cache_service.save_video(video.model_dump())
-                        else:
-                            # Mark as ERROR if no transcript available
-                            video.status = VideoStatus.ERROR
-                            video.transcript_source = "none"
-                            logger.warning(f"No transcript available for {video.title}")
-
-                            # Save to cache even without transcript
-                            cache_service.save_video(video.model_dump())
-                    else:
-                        # Skip transcript loading - mark as ready without transcript
-                        video.status = VideoStatus.READY
-                        video.transcript = ""
-                        video.transcript_source = "skipped"
-                        task_progress[task_id][
-                            "message"
-                        ] = f"Loaded metadata for video {idx + 1}/{len(video_ids)} (transcripts skipped)..."
-
-                        # Save to cache
-                        cache_service.save_video(video.model_dump())
-
-            # Update progress with more granularity
-            # Base progress is from video completion (90% of total)
-            # Reserve 10% for initial setup
-            base_progress = 10.0  # Starting point after discovery
-            video_progress = 90.0  # Remaining for video processing
-
-            task_progress[task_id]["processed"] = idx + 1
-
-            # Calculate progress based on videos completed plus partial progress for current video
-            if task_progress[task_id]["current_step"] == "metadata":
-                step_progress = 0.2  # 20% of current video
-            elif task_progress[task_id]["current_step"] == "transcript":
-                step_progress = 0.4  # 40% of current video
-            elif task_progress[task_id]["current_step"] == "whisper_downloading":
-                step_progress = 0.5  # 50% of current video
-            elif task_progress[task_id]["current_step"] == "whisper_loading":
-                step_progress = 0.6  # 60% of current video
-            elif task_progress[task_id]["current_step"] == "whisper_transcribing":
-                step_progress = 0.8  # 80% of current video
-            elif task_progress[task_id]["current_step"] == "cache":
-                step_progress = 0.1  # 10% of current video (fast)
+            if source == "whisper":
+                task_progress[task_id]["message"] = "Transcribed with Whisper"
             else:
-                step_progress = 0.0
+                task_progress[task_id]["message"] = "Got YouTube captions"
 
-            # Calculate total progress
-            videos_completed = idx
-            current_video_progress = step_progress
-            total_progress = base_progress + (
-                video_progress
-                * (videos_completed + current_video_progress)
-                / len(video_ids)
-            )
+            # Save to cache
+            cache_service.save_video(video.model_dump())
+        else:
+            video.status = VideoStatus.ERROR
+            video.transcript_source = "none"
+            logger.warning(f"No transcript available for {video.title}")
+            cache_service.save_video(video.model_dump())
 
-            task_progress[task_id]["progress"] = min(
-                total_progress, 99.0
-            )  # Cap at 99% until fully complete
-            task_progress[task_id]["elapsed_time"] = int(
-                time.time() - task_progress[task_id]["start_time"]
-            )
-
+        # Complete
         task_progress[task_id]["status"] = TaskStatus.COMPLETED
         task_progress[task_id]["progress"] = 100.0
-        task_progress[task_id][
-            "message"
-        ] = f"Completed! Loaded {len(task_progress[task_id]['videos_added'])} videos."
+        task_progress[task_id]["processed"] = 1
+        task_progress[task_id]["elapsed_time"] = int(
+            time.time() - task_progress[task_id]["start_time"]
+        )
+
+        if video.status == VideoStatus.READY:
+            task_progress[task_id]["message"] = f"Loaded: {video.title}"
+        else:
+            task_progress[task_id]["message"] = f"Loaded (no transcript): {video.title}"
 
     except Exception as e:
         task_progress[task_id]["status"] = TaskStatus.FAILED
         task_progress[task_id]["message"] = f"Error: {str(e)}"
-        logger.error(f"Error processing videos: {e}")
+        logger.error(f"Error processing video: {e}")
 
 
 @router.get("/cache/load")

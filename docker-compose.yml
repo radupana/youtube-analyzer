@@ -8,6 +8,7 @@ services:
     environment:
       - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - CACHE_DIR=/app/.cache
     volumes:
       - ./backend:/app
       - ./.cache:/app/.cache

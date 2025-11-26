@@ -21,10 +21,9 @@ class VideoBase(BaseModel):
 
 
 class VideoCreate(BaseModel):
-    url: str = Field(..., description="YouTube video/channel/playlist URL")
-    max_videos: int = Field(50, ge=1, le=500, description="Max videos for channels")
-    load_transcripts: bool = Field(
-        True, description="Whether to load transcripts (slower but needed for chat)"
+    url: str = Field(
+        ...,
+        description="YouTube video URL (e.g., https://youtube.com/watch?v=...)",
     )
 
 

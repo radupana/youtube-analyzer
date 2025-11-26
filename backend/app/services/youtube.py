@@ -34,34 +34,27 @@ class YouTubeService:
                 return match.group(1)
         return None
 
-    def extract_channel_id(self, url: str) -> str | None:
-        """Extract channel ID or username from URL."""
-        # Handle @username format
-        if "@" in url:
-            match = re.search(r"@([^/\s]+)", url)
-            if match:
-                return f"@{match.group(1)}"
+    def is_channel_url(self, url: str) -> bool:
+        """Check if URL is a channel URL (not supported)."""
+        channel_patterns = [
+            r"/@[^/\s]+",  # @username format
+            r"/channel/[^/]+",  # /channel/UC... format
+            r"/c/[^/]+",  # /c/username format
+            r"/user/[^/]+",  # /user/username format
+        ]
+        return any(re.search(pattern, url) for pattern in channel_patterns)
 
-        # Handle channel ID format
-        match = re.search(r"/channel/([^/]+)", url)
-        if match:
-            return match.group(1)
+    def is_playlist_url(self, url: str) -> bool:
+        """Check if URL is a playlist-only URL (not supported)."""
+        # Only reject if it's a playlist page without a video
+        # URLs like watch?v=xxx&list=yyy are fine (we extract the video)
+        if "list=" in url and "watch?v=" not in url and "/watch?" not in url:
+            return True
+        if "/playlist?" in url:
+            return True
+        return False
 
-        # Handle /c/username format
-        match = re.search(r"/c/([^/]+)", url)
-        if match:
-            return match.group(1)
-
-        return None
-
-    def extract_playlist_id(self, url: str) -> str | None:
-        """Extract playlist ID from URL."""
-        match = re.search(r"list=([^&]+)", url)
-        if match:
-            return match.group(1)
-        return None
-
-    def get_video_info(self, video_id: str) -> dict[str, Any]:
+    def get_video_info(self, video_id: str) -> dict[str, Any] | None:
         """Fetch video metadata from YouTube API."""
         try:
             response = (
@@ -91,185 +84,39 @@ class YouTubeService:
             logger.error(f"Error fetching video info: {e}")
             return None
 
-    def get_channel_videos(
-        self, channel_identifier: str, max_results: int = 50
-    ) -> list[str]:
-        """Get list of video IDs from a channel."""
-        try:
-            # If it's a @username, resolve to channel ID using forHandle
-            if channel_identifier.startswith("@"):
-                # Remove @ symbol for API call
-                handle = channel_identifier[1:]
-
-                try:
-                    # Use forHandle parameter for precise @handle lookup
-                    response = (
-                        self.youtube.channels()
-                        .list(part="contentDetails,snippet", forHandle=handle)
-                        .execute()
-                    )
-
-                    if response.get("items"):
-                        channel_id = response["items"][0]["id"]
-                        channel_name = response["items"][0]["snippet"]["title"]
-                        logger.info(f"Found channel: {channel_name} (ID: {channel_id})")
-                    else:
-                        # Fallback to search if forHandle doesn't work
-                        logger.info(f"forHandle failed for {handle}, trying search...")
-                        search_response = (
-                            self.youtube.search()
-                            .list(
-                                part="snippet",
-                                q=channel_identifier,
-                                type="channel",
-                                maxResults=5,  # Get more results to find the right one
-                            )
-                            .execute()
-                        )
-
-                        if not search_response.get("items"):
-                            return []
-
-                        # Try to find exact match
-                        for item in search_response["items"]:
-                            if handle.lower() in item["snippet"]["title"].lower():
-                                channel_id = item["snippet"]["channelId"]
-                                channel_name = item["snippet"]["title"]
-                                logger.info(
-                                    f"Found channel via search: {channel_name} (ID: {channel_id})"
-                                )
-                                break
-                        else:
-                            # Use first result as fallback
-                            channel_id = search_response["items"][0]["snippet"][
-                                "channelId"
-                            ]
-                            channel_name = search_response["items"][0]["snippet"][
-                                "title"
-                            ]
-                            logger.info(
-                                f"Warning: Using first search result: {channel_name} (ID: {channel_id})"
-                            )
-
-                except Exception as e:
-                    logger.error(f"Error with forHandle, falling back to search: {e}")
-                    # Fallback to search
-                    search_response = (
-                        self.youtube.search()
-                        .list(
-                            part="snippet",
-                            q=channel_identifier,
-                            type="channel",
-                            maxResults=1,
-                        )
-                        .execute()
-                    )
-
-                    if not search_response.get("items"):
-                        return []
-
-                    channel_id = search_response["items"][0]["snippet"]["channelId"]
-            else:
-                channel_id = channel_identifier
-
-            # Get channel's uploads playlist
-            channel_response = (
-                self.youtube.channels()
-                .list(part="contentDetails", id=channel_id)
-                .execute()
-            )
-
-            if not channel_response.get("items"):
-                return []
-
-            uploads_playlist_id = channel_response["items"][0]["contentDetails"][
-                "relatedPlaylists"
-            ]["uploads"]
-
-            # Get videos from uploads playlist
-            video_ids = []
-            next_page_token = None
-
-            while len(video_ids) < max_results:
-                playlist_response = (
-                    self.youtube.playlistItems()
-                    .list(
-                        part="contentDetails",
-                        playlistId=uploads_playlist_id,
-                        maxResults=min(50, max_results - len(video_ids)),
-                        pageToken=next_page_token,
-                    )
-                    .execute()
-                )
-
-                for item in playlist_response.get("items", []):
-                    video_ids.append(item["contentDetails"]["videoId"])
-
-                next_page_token = playlist_response.get("nextPageToken")
-                if not next_page_token:
-                    break
-
-            return video_ids[:max_results]
-
-        except Exception as e:
-            logger.error(f"Error fetching channel videos: {e}")
-            return []
-
-    def get_playlist_videos(self, playlist_id: str, max_results: int = 50) -> list[str]:
-        """Get list of video IDs from a playlist."""
-        try:
-            video_ids = []
-            next_page_token = None
-
-            while len(video_ids) < max_results:
-                response = (
-                    self.youtube.playlistItems()
-                    .list(
-                        part="contentDetails",
-                        playlistId=playlist_id,
-                        maxResults=min(50, max_results - len(video_ids)),
-                        pageToken=next_page_token,
-                    )
-                    .execute()
-                )
-
-                for item in response.get("items", []):
-                    video_ids.append(item["contentDetails"]["videoId"])
-
-                next_page_token = response.get("nextPageToken")
-                if not next_page_token:
-                    break
-
-            return video_ids[:max_results]
-
-        except Exception as e:
-            logger.error(f"Error fetching playlist videos: {e}")
-            return []
-
     def get_transcript(
-        self, video_id: str, use_whisper_fallback: bool = None, progress_callback=None
+        self,
+        video_id: str,
+        use_whisper_fallback: bool | None = None,
+        progress_callback: Any = None,
     ) -> tuple[str | None, str]:
         """
         Get transcript for a video (YouTube captions or Whisper fallback).
         Returns: (transcript_text, source) where source is 'youtube' or 'whisper'
         """
         try:
-            # Try YouTube transcript API first
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            # Try YouTube transcript API first (v1.x API)
+            logger.info(f"Attempting to fetch YouTube transcript for {video_id}")
+            ytt_api = YouTubeTranscriptApi()
 
-            # Try to get English transcript
+            # Try English first, then fall back to any available language
             try:
-                transcript = transcript_list.find_transcript(["en"])
+                transcript = ytt_api.fetch(video_id, languages=["en"])
+                logger.info("Found English transcript")
             except Exception:
-                # Get any available transcript
-                transcript = transcript_list.find_generated_transcript(["en"])
+                # Try to get any transcript (will get first available)
+                transcript = ytt_api.fetch(video_id)
+                logger.info("Using auto-detected language transcript")
 
-            # Combine all text
-            text_parts = [entry["text"] for entry in transcript.fetch()]
-            return " ".join(text_parts), "youtube"
+            # Combine all text - transcript is iterable with text/start/duration
+            text_parts = [entry.text for entry in transcript]
+            result = " ".join(text_parts)
+            logger.info(f"Transcript fetched successfully ({len(result)} chars)")
+            return result, "youtube"
 
         except Exception as e:
             logger.error(f"YouTube transcript not available: {e}")
+            logger.exception("Full traceback:")
 
             # Check if Whisper fallback is enabled
             if use_whisper_fallback is None:
@@ -281,11 +128,11 @@ class YouTubeService:
                     from app.services.whisper import WhisperService
 
                     whisper_service = WhisperService()
-                    transcript = whisper_service.get_whisper_transcript(
+                    whisper_transcript = whisper_service.get_whisper_transcript(
                         video_id, progress_callback
                     )
-                    if transcript:
-                        return transcript, "whisper"
+                    if whisper_transcript:
+                        return whisper_transcript, "whisper"
                 except Exception as whisper_error:
                     logger.error(f"Whisper fallback also failed: {whisper_error}")
 

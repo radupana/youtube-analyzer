@@ -1,5 +1,6 @@
 """Chat endpoints with real Gemini integration."""
 
+import asyncio
 from uuid import uuid4
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -29,8 +30,10 @@ async def send_message(request: ChatRequest):
         for v in loaded_videos.values()
     ]
 
-    # Get AI response
-    response = llm_service.chat_with_context(request.message, video_context)
+    # Get AI response - run in thread to not block event loop
+    response = await asyncio.to_thread(
+        llm_service.chat_with_context, request.message, video_context
+    )
 
     return ChatResponse(
         response=response,
@@ -58,8 +61,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 for v in loaded_videos.values()
             ]
 
-            # Get AI response
-            response = llm_service.chat_with_context(data, video_context)
+            # Get AI response - run in thread to not block event loop
+            response = await asyncio.to_thread(
+                llm_service.chat_with_context, data, video_context
+            )
 
             await websocket.send_text(response)
     except WebSocketDisconnect:

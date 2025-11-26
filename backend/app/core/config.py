@@ -25,7 +25,6 @@ class Settings(BaseSettings):
         default=["http://localhost:3000", "http://127.0.0.1:3000"]
     )
 
-    max_videos_default: int = Field(default=50, validation_alias="MAX_VIDEOS")
     whisper_model: str = Field(default="base", validation_alias="WHISPER_MODEL")
     enable_whisper_fallback: bool = Field(
         default=True, validation_alias="ENABLE_WHISPER_FALLBACK"

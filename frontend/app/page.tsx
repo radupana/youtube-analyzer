@@ -5,7 +5,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { ScrollArea } from "@/components/ui/scroll-area"
 
 interface Video {
   id: string
@@ -37,8 +36,8 @@ export default function Home() {
   const [videos, setVideos] = useState<Video[]>([])
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [inputUrl, setInputUrl] = useState("")
-  const [videoCount, setVideoCount] = useState<number | string>(50)
   const [chatInput, setChatInput] = useState("")
+  const [urlError, setUrlError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [sendingMessage, setSendingMessage] = useState(false)
   const [currentTask, setCurrentTask] = useState<string | null>(null)
@@ -86,7 +85,33 @@ export default function Home() {
     return () => clearInterval(interval)
   }, [currentTask])
 
-  const handleAddContent = async () => {
+  // Basic frontend validation for URL type
+  const isChannelUrl = (url: string) => {
+    return /@[^/\s]+/.test(url) ||
+           /\/channel\//.test(url) ||
+           /\/c\//.test(url) ||
+           /\/user\//.test(url)
+  }
+
+  const isPlaylistOnlyUrl = (url: string) => {
+    // Reject playlist pages without a video
+    if (url.includes("list=") && !url.includes("watch?v=")) return true
+    return url.includes("/playlist?");
+  }
+
+  const handleAddVideo = async () => {
+    setUrlError(null)
+
+    // Frontend validation
+    if (isChannelUrl(inputUrl)) {
+      setUrlError("Only single video URLs are supported. Please paste a video URL, not a channel.")
+      return
+    }
+    if (isPlaylistOnlyUrl(inputUrl)) {
+      setUrlError("Only single video URLs are supported. Please paste a video URL, not a playlist.")
+      return
+    }
+
     setLoading(true)
     setTaskProgress(null)
 
@@ -94,22 +119,22 @@ export default function Home() {
       const response = await fetch("http://localhost:8000/api/v1/videos/add", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: inputUrl,
-          max_videos: videoCount === "" ? 50 : Number(videoCount)
-        }),
+        body: JSON.stringify({ url: inputUrl }),
       })
 
       if (!response.ok) {
-        throw new Error("Failed to add content")
+        const errorData = await response.json()
+        setUrlError(errorData.detail || "Failed to add video")
+        setLoading(false)
+        return
       }
 
       const data = await response.json()
       setCurrentTask(data.task_id)
       setInputUrl("")
     } catch (error) {
-      console.error("Error adding content:", error)
-      alert("Failed to add content. Check console for details.")
+      console.error("Error adding video:", error)
+      setUrlError("Failed to add video. Check if the backend is running.")
       setLoading(false)
     }
   }
@@ -201,54 +226,47 @@ export default function Home() {
     <div className="container mx-auto p-4 max-w-7xl">
       <h1 className="text-4xl font-bold mb-6">YouTube Analyzer</h1>
 
-      <div className="grid grid-cols-3 gap-6">
-        <div className="col-span-1 space-y-4">
+      <div className="grid grid-cols-3 gap-6 h-[calc(100vh-140px)]">
+        <div className="col-span-1 flex flex-col gap-4">
           <Card>
             <CardHeader>
-              <CardTitle>Add Content</CardTitle>
+              <CardTitle>Add video</CardTitle>
               <CardDescription>
-                Add YouTube videos, channels, or playlists
+                Paste a YouTube video URL to analyze
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div>
-                <Label htmlFor="url">YouTube URL</Label>
+                <Label htmlFor="url">YouTube Video URL</Label>
                 <Input
                   id="url"
                   type="url"
-                  placeholder="https://youtube.com/watch?v=... or @channel"
+                  placeholder="https://youtube.com/watch?v=..."
                   value={inputUrl}
-                  onChange={(e) => setInputUrl(e.target.value)}
+                  onChange={(e) => {
+                    setInputUrl(e.target.value)
+                    setUrlError(null)
+                  }}
                   disabled={loading}
+                  className={urlError ? "border-red-500" : ""}
                 />
-              </div>
-              <div>
-                <Label htmlFor="count">Max videos (for channels/playlists)</Label>
-                <Input
-                  id="count"
-                  type="number"
-                  min="1"
-                  max="500"
-                  value={videoCount}
-                  onChange={(e) => setVideoCount(e.target.value === "" ? "" : parseInt(e.target.value) || 1)}
-                  disabled={loading}
-                />
+                {urlError && (
+                  <p className="text-sm text-red-500 mt-1">{urlError}</p>
+                )}
               </div>
               <Button
-                onClick={handleAddContent}
+                onClick={handleAddVideo}
                 disabled={loading || !inputUrl}
                 className="w-full"
               >
                 {loading ? (
                   taskProgress && taskProgress.current_step?.startsWith('whisper_') ?
-                    taskProgress.current_step === 'whisper_downloading' ? "⬇️ Downloading audio..." :
-                    taskProgress.current_step === 'whisper_loading' ? "📦 Loading model..." :
-                    taskProgress.current_step === 'whisper_transcribing' ? "🎤 Transcribing..." :
-                    "🎤 Using Whisper..." :
-                    taskProgress && taskProgress.processed > 0 ?
-                      `Processing ${taskProgress.processed}/${taskProgress.total}...` :
-                      "Processing..."
-                ) : "Add to Context"}
+                    taskProgress.current_step === 'whisper_downloading' ? "Downloading audio..." :
+                    taskProgress.current_step === 'whisper_loading' ? "Loading Whisper..." :
+                    taskProgress.current_step === 'whisper_transcribing' ? "Transcribing..." :
+                    "Processing..." :
+                    "Processing..."
+                ) : "Add video"}
               </Button>
 
               {/* Progress indicator */}
@@ -259,18 +277,17 @@ export default function Home() {
                       <div className="text-sm font-medium">{taskProgress.message}</div>
                       {taskProgress.current_video && (
                         <div className="text-xs text-muted-foreground mt-1">
-                          Current: {taskProgress.current_video}
+                          {taskProgress.current_video}
                         </div>
                       )}
                     </div>
-                    {taskProgress.elapsed_time && (
+                    {taskProgress.elapsed_time !== undefined && taskProgress.elapsed_time > 0 && (
                       <div className="text-xs text-muted-foreground ml-2">
                         {Math.floor(taskProgress.elapsed_time / 60)}:{(taskProgress.elapsed_time % 60).toString().padStart(2, '0')}
                       </div>
                     )}
                   </div>
 
-                  {/* Always show progress bar, even for single video */}
                   <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
                     <div
                       className="bg-primary h-2 rounded-full transition-all duration-300"
@@ -278,33 +295,22 @@ export default function Home() {
                     />
                   </div>
 
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    {taskProgress.total > 0 ? (
-                      <span>{taskProgress.processed}/{taskProgress.total} videos</span>
-                    ) : (
-                      <span>Initializing...</span>
-                    )}
-                    {taskProgress.current_step && (
-                      <span className="text-blue-600">
-                        {taskProgress.current_step === 'cache' && '💾 Loading from cache...'}
-                        {taskProgress.current_step === 'whisper' && '🎤 Using Whisper...'}
-                        {taskProgress.current_step === 'whisper_downloading' && '⬇️ Downloading audio...'}
-                        {taskProgress.current_step === 'whisper_loading' && '📦 Loading Whisper model...'}
-                        {taskProgress.current_step === 'whisper_transcribing' && '🎤 Transcribing (1-2 min)...'}
-                        {taskProgress.current_step === 'whisper_complete' && '✅ Whisper complete!'}
-                        {taskProgress.current_step === 'transcript' && '📝 Getting transcript...'}
-                        {taskProgress.current_step === 'metadata' && '📋 Loading metadata...'}
-                        {taskProgress.current_step === 'rate_limit' && '⏳ Rate limiting...'}
-                        {taskProgress.current_step === 'discovery' && '🔍 Finding videos...'}
-                      </span>
-                    )}
-                  </div>
+                  {taskProgress.current_step && (
+                    <div className="text-xs text-muted-foreground">
+                      {taskProgress.current_step === 'cache' && 'Loading from cache...'}
+                      {taskProgress.current_step === 'whisper_downloading' && 'Downloading audio...'}
+                      {taskProgress.current_step === 'whisper_loading' && 'Loading Whisper model...'}
+                      {taskProgress.current_step === 'whisper_transcribing' && 'Transcribing with Whisper...'}
+                      {taskProgress.current_step === 'transcript' && 'Fetching transcript...'}
+                      {taskProgress.current_step === 'metadata' && 'Loading video info...'}
+                    </div>
+                  )}
                 </div>
               )}
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="flex-1 flex flex-col min-h-0">
             <CardHeader>
               <div className="flex justify-between items-center">
                 <CardTitle>Loaded Videos ({videos.length})</CardTitle>
@@ -329,16 +335,16 @@ export default function Home() {
                 )}
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="flex-1 min-h-0 overflow-hidden">
               {videos.length === 0 ? (
                 <p className="text-muted-foreground">No videos loaded</p>
               ) : (
-                <ScrollArea className="h-[400px]">
+                <div className="h-full overflow-y-auto">
                   <ul className="space-y-2">
                     {videos.map((video) => (
-                      <li key={video.id} className="p-2 border rounded-lg">
+                      <li key={video.id} className="p-2 border rounded-lg overflow-hidden">
                         <div className="flex justify-between items-start">
-                          <div className="flex-1 mr-2">
+                          <div className="flex-1 min-w-0 mr-2">
                             <div className="font-medium text-sm truncate" title={video.title}>
                               {video.title}
                             </div>
@@ -375,7 +381,7 @@ export default function Home() {
                             size="sm"
                             variant="ghost"
                             onClick={() => handleRemoveVideo(video.id)}
-                            className="text-red-600 hover:text-red-700"
+                            className="shrink-0 text-red-600 hover:text-red-700"
                           >
                             Remove
                           </Button>
@@ -383,14 +389,14 @@ export default function Home() {
                       </li>
                     ))}
                   </ul>
-                </ScrollArea>
+                </div>
               )}
             </CardContent>
           </Card>
         </div>
 
-        <div className="col-span-2">
-          <Card className="h-[600px] flex flex-col">
+        <div className="col-span-2 flex flex-col">
+          <Card className="flex-1 flex flex-col min-h-0 overflow-hidden">
             <CardHeader>
               <CardTitle>Chat</CardTitle>
               <CardDescription>
@@ -412,12 +418,12 @@ export default function Home() {
                 )}
               </CardDescription>
             </CardHeader>
-            <CardContent className="flex-1 flex flex-col">
-              <ScrollArea className="flex-1 mb-4 p-4 border rounded-lg bg-muted/10">
+            <CardContent className="flex-1 flex flex-col min-h-0 !p-0">
+              <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
                 <div className="space-y-4">
                   {messages.length === 0 ? (
                     <p className="text-muted-foreground text-center">
-                      Start by adding YouTube content, then ask questions!
+                      Add a YouTube video, then ask questions about it!
                     </p>
                   ) : (
                     messages.map((message, index) => (
@@ -449,17 +455,22 @@ export default function Home() {
                     </div>
                   )}
                 </div>
-              </ScrollArea>
+              </div>
 
-              <div className="flex gap-2">
+              <div className="flex gap-2 px-6 pb-6">
                 <Input
+                  className="flex-1"
                   placeholder="Ask about the videos..."
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
                   onKeyPress={(e) => e.key === "Enter" && !sendingMessage && handleSendMessage()}
                   disabled={sendingMessage}
                 />
-                <Button onClick={handleSendMessage} disabled={sendingMessage || !chatInput.trim()}>
+                <Button
+                  className="shrink-0"
+                  onClick={handleSendMessage}
+                  disabled={sendingMessage || !chatInput.trim()}
+                >
                   {sendingMessage ? "Sending..." : "Send"}
                 </Button>
               </div>
