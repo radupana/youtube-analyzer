@@ -128,11 +128,11 @@ class YouTubeService:
                     from app.services.whisper import WhisperService
 
                     whisper_service = WhisperService()
-                    transcript = whisper_service.get_whisper_transcript(
+                    whisper_transcript = whisper_service.get_whisper_transcript(
                         video_id, progress_callback
                     )
-                    if transcript:
-                        return transcript, "whisper"
+                    if whisper_transcript:
+                        return whisper_transcript, "whisper"
                 except Exception as whisper_error:
                     logger.error(f"Whisper fallback also failed: {whisper_error}")
 
