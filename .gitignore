@@ -215,6 +215,7 @@ __marimo__/
 
 # Project documentation (private)
 *.md
+!.github/copilot-instructions.md
 
 # Project specific
 config.yaml
@@ -237,6 +238,7 @@ frontend/.next/
 frontend/out/
 frontend/node_modules/
 frontend/package-lock.json
+frontend/tsconfig.tsbuildinfo
 
 # Backend
 backend/.venv/

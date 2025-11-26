@@ -1,12 +1,12 @@
 # YouTube Analyzer
 
-Analyze YouTube channels using AI. Extract transcripts from videos, ask questions, and get insights through a web interface.
+Analyze YouTube videos using AI. Extract transcripts, ask questions, and get insights through a web interface.
 
 **Use cases:**
-- Summarize a creator's advice across multiple videos
-- Extract training programs, recipes, or tutorials from video content
-- Research topics by analyzing educational channels
-- Build knowledge bases from video transcripts
+- Summarize key points from long-form video content
+- Extract training programs, recipes, or tutorials from videos
+- Research topics by analyzing educational content
+- Build context by adding multiple videos one at a time
 
 ## Prerequisites
 
@@ -44,18 +44,17 @@ YOUTUBE_API_KEY=your_youtube_api_key
 GEMINI_API_KEY=your_gemini_api_key
 
 # Optional (with defaults)
-MAX_VIDEOS=50              # Maximum videos to process
 WHISPER_MODEL=base         # Whisper model size (tiny, base, small, medium, large)
 LLM_MODEL=gemini-2.0-flash # LLM model to use
 ```
 
 ## How It Works
 
-1. **Fetches transcripts** via YouTube's caption API (fast, free)
-2. **Falls back to Whisper** audio transcription if captions unavailable
-3. **Caches everything** locally for fast repeat runs
-4. **Smart context mode:** Uses full-context for small datasets, RAG for large ones
-5. **Analyzes with LLM** based on your intent
+1. **Paste a video URL** - Add YouTube videos one at a time
+2. **Fetches transcripts** via YouTube's caption API (fast, free)
+3. **Falls back to Whisper** audio transcription if captions unavailable
+4. **Caches everything** locally for fast repeat access
+5. **Chat with AI** about your loaded videos
 
 ## Stop & Clean Up
 

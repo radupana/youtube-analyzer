@@ -63,6 +63,7 @@ class WhisperService:
                 if os.path.exists(audio_file):
                     # Read the file and return path for processing
                     return audio_file
+                return None
 
         except Exception as e:
             logger.error(f"Error downloading audio for {video_id}: {e}")
@@ -89,12 +90,11 @@ class WhisperService:
                         }
                     )
 
-            # Use verbose=True to get progress updates
             result = self.model.transcribe(
                 audio_path,
                 language="en",
                 task="transcribe",
-                verbose=True,  # This will show progress
+                verbose=False,  # Disable verbose output to reduce log noise
                 fp16=False,  # Disable FP16 to avoid warning
             )
 
@@ -122,12 +122,22 @@ class WhisperService:
                 }
             ],
             # Aggressive options to bypass YouTube blocks
-            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "user-agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
             "referer": "https://www.youtube.com/",
             "extractor-args": "youtube:player_client=android,web_creator,ios",
             "http_headers": {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                ),
+                "Accept": (
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+                ),
                 "Accept-Language": "en-US,en;q=0.5",
                 "Sec-Fetch-Mode": "navigate",
             },
@@ -223,9 +233,7 @@ class WhisperService:
 
                 # Method 1: yt-dlp with Android client
                 if progress_callback:
-                    progress_callback(
-                        "whisper_downloading", "⬇️ Downloading audio (method 1/3)..."
-                    )
+                    progress_callback("whisper_downloading", "Downloading audio...")
                 audio_path = self.download_with_ytdlp(video_id, temp_dir)
 
                 # Method 2: pytube as fallback
@@ -234,7 +242,7 @@ class WhisperService:
                     if progress_callback:
                         progress_callback(
                             "whisper_downloading",
-                            "⬇️ Trying alternative download (method 2/3)...",
+                            "Retrying download...",
                         )
                     audio_path = self.download_with_pytube(video_id, temp_dir)
 
@@ -244,7 +252,7 @@ class WhisperService:
                     if progress_callback:
                         progress_callback(
                             "whisper_downloading",
-                            "⬇️ Updating downloader (method 3/3)...",
+                            "Retrying download...",
                         )
                     audio_path = self.download_with_ytdlp_update(video_id, temp_dir)
 
@@ -253,20 +261,16 @@ class WhisperService:
                     return None
 
                 if progress_callback:
-                    progress_callback(
-                        "whisper_downloading", "✅ Audio downloaded successfully"
-                    )
+                    progress_callback("whisper_downloading", "Audio downloaded")
 
                 # Loading model
                 if progress_callback:
                     if self.model:
-                        progress_callback(
-                            "whisper_loading", "📦 Whisper model already loaded"
-                        )
+                        progress_callback("whisper_loading", "Whisper model ready")
                     else:
                         progress_callback(
                             "whisper_loading",
-                            f"📦 Loading Whisper {self.model_name} model (first time ~15s)...",
+                            "Loading speech recognition model...",
                         )
 
                 # Ensure model is loaded
@@ -306,7 +310,7 @@ class WhisperService:
                 if progress_callback:
                     progress_callback(
                         "whisper_transcribing",
-                        f"🎤 Transcribing{duration_msg} (typically 10-30s)...",
+                        f"Transcribing audio{duration_msg}...",
                     )
 
                 logger.info(f"Transcribing with Whisper model {self.model_name}...")
@@ -315,9 +319,7 @@ class WhisperService:
                 if transcript:
                     logger.info(f"Successfully transcribed {video_id} with Whisper")
                     if progress_callback:
-                        progress_callback(
-                            "whisper_complete", "✅ Transcription complete!"
-                        )
+                        progress_callback("whisper_complete", "Transcription complete")
 
                 return transcript
 

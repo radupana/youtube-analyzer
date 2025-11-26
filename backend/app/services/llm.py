@@ -35,14 +35,16 @@ class LLMService:
                     context += "Transcript: Not available\n\n"
 
         # Create prompt
-        prompt = f"""You are an AI assistant analyzing YouTube video content. You have been given transcripts of videos that the user has loaded.
+        prompt = f"""You are an AI assistant analyzing YouTube video content.
+You have been given transcripts of videos that the user has loaded.
 
 Context of loaded videos:
 {context}
 
 User question: {message}
 
-Please provide a helpful response based on the video content available. If the question cannot be answered from the available videos, say so clearly."""
+Please provide a helpful response based on the video content available.
+If the question cannot be answered from the available videos, say so clearly."""
 
         try:
             response = self.model.generate_content(prompt)

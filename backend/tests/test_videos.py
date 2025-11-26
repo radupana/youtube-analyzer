@@ -1,5 +1,6 @@
-from app.main import app
 from fastapi.testclient import TestClient
+
+from app.main import app
 
 client = TestClient(app)
 
@@ -38,12 +39,34 @@ def test_get_video_not_found():
 def test_add_video():
     response = client.post(
         "/api/v1/videos/add",
-        json={"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "max_videos": 10},
+        json={"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"},
     )
     assert response.status_code == 200
     data = response.json()
     assert "task_id" in data
     assert data["status"] == "pending"
+
+
+def test_add_channel_url_rejected():
+    """Channel URLs should be rejected with 400."""
+    response = client.post(
+        "/api/v1/videos/add",
+        json={"url": "https://www.youtube.com/@JeffNippard"},
+    )
+    assert response.status_code == 400
+    assert "single video URLs" in response.json()["detail"]
+
+
+def test_add_playlist_url_rejected():
+    """Playlist URLs should be rejected with 400."""
+    response = client.post(
+        "/api/v1/videos/add",
+        json={
+            "url": "https://www.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf"
+        },
+    )
+    assert response.status_code == 400
+    assert "single video URLs" in response.json()["detail"]
 
 
 def test_delete_video():
