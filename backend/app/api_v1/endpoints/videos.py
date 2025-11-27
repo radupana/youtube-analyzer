@@ -6,7 +6,7 @@ import time
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from sqlmodel import Session, create_engine, select
+from sqlmodel import Session, select
 
 from app.api_v1.schemas import (
     TaskResponse,
@@ -16,7 +16,7 @@ from app.api_v1.schemas import (
     VideoList,
     VideoStatus,
 )
-from app.db.database import get_database_url, get_session
+from app.db.database import get_engine, get_session
 from app.db.models import Session as DBSession
 from app.db.models import SessionVideo, utc_now
 from app.services.cache import get_cache_service
@@ -220,10 +220,7 @@ async def process_single_video(task_id: str, video_id: str, session_id: str):
 
 async def save_video_to_session(session_id: str, video: Video):
     """Save video to database session."""
-    engine = create_engine(
-        get_database_url(), connect_args={"check_same_thread": False}
-    )
-    with Session(engine) as db:
+    with Session(get_engine()) as db:
         session = db.get(DBSession, session_id)
         if not session:
             return

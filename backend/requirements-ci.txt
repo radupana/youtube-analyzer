@@ -18,6 +18,9 @@ litellm>=1.50.0
 # Config
 pyyaml>=6.0
 
+# Database
+sqlmodel>=0.0.22
+
 # Testing
 pytest>=8.0.0
 pytest-asyncio>=0.24.0

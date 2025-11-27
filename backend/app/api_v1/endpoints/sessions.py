@@ -20,26 +20,45 @@ router = APIRouter()
 
 @router.get("", response_model=SessionListResponse)
 def list_sessions(db: Session = Depends(get_session)):
-    sessions = db.exec(select(DBSession).order_by(DBSession.updated_at.desc())).all()
+    # Subquery for video counts per session
+    video_counts = (
+        select(SessionVideo.session_id, func.count().label("count"))
+        .group_by(SessionVideo.session_id)
+        .subquery()
+    )
 
-    summaries = []
-    for s in sessions:
-        video_count = db.exec(
-            select(func.count()).where(SessionVideo.session_id == s.id)
-        ).one()
-        message_count = db.exec(
-            select(func.count()).where(Message.session_id == s.id)
-        ).one()
-        summaries.append(
-            SessionSummary(
-                id=s.id,
-                title=s.title,
-                created_at=s.created_at,
-                updated_at=s.updated_at,
-                video_count=video_count,
-                message_count=message_count,
-            )
+    # Subquery for message counts per session
+    message_counts = (
+        select(Message.session_id, func.count().label("count"))
+        .group_by(Message.session_id)
+        .subquery()
+    )
+
+    # Main query with LEFT JOINs to get counts in single query
+    query = (
+        select(
+            DBSession,
+            func.coalesce(video_counts.c.count, 0).label("video_count"),
+            func.coalesce(message_counts.c.count, 0).label("message_count"),
         )
+        .outerjoin(video_counts, DBSession.id == video_counts.c.session_id)  # type: ignore[arg-type]
+        .outerjoin(message_counts, DBSession.id == message_counts.c.session_id)  # type: ignore[arg-type]
+        .order_by(DBSession.updated_at.desc())
+    )
+
+    results = db.exec(query).all()
+
+    summaries = [
+        SessionSummary(
+            id=row[0].id,
+            title=row[0].title,
+            created_at=row[0].created_at,
+            updated_at=row[0].updated_at,
+            video_count=row[1],
+            message_count=row[2],
+        )
+        for row in results
+    ]
 
     return SessionListResponse(sessions=summaries, total=len(summaries))
 
@@ -71,13 +90,13 @@ def get_session_detail(session_id: str, db: Session = Depends(get_session)):
     messages = db.exec(
         select(Message)
         .where(Message.session_id == session_id)
-        .order_by(Message.created_at)  # type: ignore
+        .order_by(Message.created_at)  # type: ignore[arg-type]
     ).all()
 
     videos = db.exec(
         select(SessionVideo)
         .where(SessionVideo.session_id == session_id)
-        .order_by(SessionVideo.added_at)  # type: ignore
+        .order_by(SessionVideo.added_at)  # type: ignore[arg-type]
     ).all()
 
     return SessionDetailResponse(
