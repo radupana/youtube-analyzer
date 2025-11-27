@@ -14,16 +14,15 @@ try:
 except ImportError:
     YouTube = None
 
-from app.core.config import get_settings
+from app.core.llm_config import get_whisper_config
 
 logger = logging.getLogger(__name__)
 
 
 class WhisperService:
     def __init__(self):
-        self.settings = get_settings()
         self.model = None
-        self.model_name = self.settings.whisper_model
+        self.model_name = get_whisper_config().model
 
     def _load_model(self):
         """Lazy load Whisper model."""

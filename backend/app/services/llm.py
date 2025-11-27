@@ -1,53 +1,70 @@
-"""LLM service for chat functionality using Gemini."""
-
 from typing import Any
 
-import google.generativeai as genai
+import litellm
+from fastapi import HTTPException
+from litellm.exceptions import APIError, AuthenticationError, NotFoundError
 
-from app.core.config import get_settings
+from app.core.llm_config import get_current_provider
 
-
-class LLMService:
-    def __init__(self):
-        self.settings = get_settings()
-        genai.configure(api_key=self.settings.gemini_api_key)
-        self.model = genai.GenerativeModel(self.settings.llm_model)
-
-    def chat_with_context(
-        self, message: str, video_transcripts: list[dict[str, Any]]
-    ) -> str:
-        """Process a chat message with video context."""
-
-        # Build context from loaded videos
-        if not video_transcripts:
-            context = "No videos have been loaded yet."
-        else:
-            context = "You have access to the following video transcripts:\n\n"
-            for video in video_transcripts:
-                context += f"**{video['title']}** by {video['channel_title']}\n"
-                if video.get("transcript"):
-                    # Truncate very long transcripts for context
-                    transcript = video["transcript"]
-                    if len(transcript) > 5000:
-                        transcript = transcript[:5000] + "... (truncated)"
-                    context += f"Transcript: {transcript}\n\n"
-                else:
-                    context += "Transcript: Not available\n\n"
-
-        # Create prompt
-        prompt = f"""You are an AI assistant analyzing YouTube video content.
+SYSTEM_PROMPT = """You are an AI assistant analyzing YouTube video content.
 You have been given transcripts of videos that the user has loaded.
-
-Context of loaded videos:
-{context}
-
-User question: {message}
-
-Please provide a helpful response based on the video content available.
+Please provide helpful responses based on the video content available.
 If the question cannot be answered from the available videos, say so clearly."""
 
-        try:
-            response = self.model.generate_content(prompt)
-            return response.text
-        except Exception as e:
-            return f"Error generating response: {str(e)}"
+
+def build_context(video_transcripts: list[dict[str, Any]]) -> str:
+    if not video_transcripts:
+        return "No videos have been loaded yet."
+
+    parts = ["You have access to the following video transcripts:\n"]
+    for video in video_transcripts:
+        parts.append(f"**{video['title']}** by {video['channel_title']}")
+        transcript = video.get("transcript")
+        if transcript:
+            if len(transcript) > 5000:
+                transcript = transcript[:5000] + "... (truncated)"
+            parts.append(f"Transcript: {transcript}\n")
+        else:
+            parts.append("Transcript: Not available\n")
+    return "\n".join(parts)
+
+
+async def chat_with_context(
+    message: str, video_transcripts: list[dict[str, Any]]
+) -> str:
+    provider = get_current_provider()
+    if not provider:
+        raise HTTPException(
+            status_code=503,
+            detail="No LLM provider configured. Check config.yaml and API keys.",
+        )
+
+    context = build_context(video_transcripts)
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": f"{context}\n\nUser question: {message}"},
+    ]
+
+    try:
+        response = await litellm.acompletion(
+            model=provider.model,
+            messages=messages,
+            api_key=provider.api_key,
+        )
+        content = response.choices[0].message.content
+        return content if content else ""
+    except AuthenticationError as e:
+        raise HTTPException(
+            status_code=401,
+            detail=f"Invalid API key for {provider.name}",
+        ) from e
+    except NotFoundError as e:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Model '{provider.model}' not found. {e.message}",
+        ) from e
+    except APIError as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"{provider.name} error: {e.message}",
+        ) from e

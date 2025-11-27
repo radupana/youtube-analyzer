@@ -15,7 +15,10 @@ openai-whisper
 ffmpeg-python>=0.2.0
 
 # LLM
-google-generativeai>=0.8.0
+litellm>=1.50.0
+
+# Config
+pyyaml>=6.0
 
 # Testing
 pytest>=8.0.0

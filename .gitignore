@@ -218,7 +218,6 @@ __marimo__/
 !.github/copilot-instructions.md
 
 # Project specific
-config.yaml
 !frontend/**/*.json
 !backend/**/*.json
 !tests/fixtures/*.json
