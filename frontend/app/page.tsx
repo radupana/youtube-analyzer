@@ -32,6 +32,12 @@ interface TaskProgress {
   elapsed_time?: number
 }
 
+interface LLMProvider {
+  id: string
+  name: string
+  model: string
+}
+
 export default function Home() {
   const [videos, setVideos] = useState<Video[]>([])
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -42,6 +48,29 @@ export default function Home() {
   const [sendingMessage, setSendingMessage] = useState(false)
   const [currentTask, setCurrentTask] = useState<string | null>(null)
   const [taskProgress, setTaskProgress] = useState<TaskProgress | null>(null)
+  const [providers, setProviders] = useState<LLMProvider[]>([])
+  const [currentProvider, setCurrentProvider] = useState<LLMProvider | null>(null)
+
+  // Fetch LLM providers on mount
+  useEffect(() => {
+    const fetchProviders = async () => {
+      try {
+        const [providersRes, currentRes] = await Promise.all([
+          fetch("http://localhost:8000/api/v1/settings/llm-providers"),
+          fetch("http://localhost:8000/api/v1/settings/llm-provider"),
+        ])
+        if (providersRes.ok) {
+          setProviders(await providersRes.json())
+        }
+        if (currentRes.ok) {
+          setCurrentProvider(await currentRes.json())
+        }
+      } catch (error) {
+        console.error("Error fetching providers:", error)
+      }
+    }
+    fetchProviders()
+  }, [])
 
   // Poll for videos periodically
   useEffect(() => {
@@ -174,11 +203,17 @@ export default function Home() {
         body: JSON.stringify({ message: messageText }),
       })
 
-      if (!response.ok) {
-        throw new Error("Failed to send message")
-      }
-
       const data = await response.json()
+
+      if (!response.ok) {
+        const errorMessage: ChatMessage = {
+          role: "assistant",
+          content: `Error: ${data.detail || "Failed to get response"}`,
+        }
+        setMessages(prev => [...prev, errorMessage])
+        setSendingMessage(false)
+        return
+      }
 
       const assistantMessage: ChatMessage = {
         role: "assistant",
@@ -189,11 +224,26 @@ export default function Home() {
       console.error("Error sending message:", error)
       const errorMessage: ChatMessage = {
         role: "assistant",
-        content: "Error: Failed to get response. Please check if the backend is running.",
+        content: "Error: Cannot connect to backend. Is it running?",
       }
       setMessages(prev => [...prev, errorMessage])
     }
     setSendingMessage(false)
+  }
+
+  const handleProviderChange = async (providerId: string) => {
+    try {
+      const response = await fetch("http://localhost:8000/api/v1/settings/llm-provider", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: providerId }),
+      })
+      if (response.ok) {
+        setCurrentProvider(await response.json())
+      }
+    } catch (error) {
+      console.error("Error changing provider:", error)
+    }
   }
 
   const getStatusColor = (status: string) => {
@@ -224,7 +274,26 @@ export default function Home() {
 
   return (
     <div className="container mx-auto p-4 max-w-7xl">
-      <h1 className="text-4xl font-bold mb-6">YouTube Analyzer</h1>
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-4xl font-bold">YouTube Analyzer</h1>
+        {providers.length > 0 && (
+          <div className="flex items-center gap-2">
+            <Label htmlFor="provider" className="text-sm text-muted-foreground">Model:</Label>
+            <select
+              id="provider"
+              value={currentProvider?.id || ""}
+              onChange={(e) => handleProviderChange(e.target.value)}
+              className="border rounded px-2 py-1 text-sm bg-background"
+            >
+              {providers.map((provider) => (
+                <option key={provider.id} value={provider.id}>
+                  {provider.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
 
       <div className="grid grid-cols-3 gap-6 h-[calc(100vh-140px)]">
         <div className="col-span-1 flex flex-col gap-4">

@@ -17,12 +17,8 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
-          cache: 'pip'
-          cache-dependency-path: backend/requirements.txt
-      - name: Install dependencies
-        run: |
-          pip install ruff mypy
-          pip install -r requirements.txt
+      - name: Install linters
+        run: pip install ruff mypy types-PyYAML pydantic pydantic-settings fastapi litellm pyyaml
       - name: Ruff check
         run: ruff check .
       - name: Ruff format check
@@ -44,9 +40,9 @@ jobs:
         with:
           python-version: '3.13'
           cache: 'pip'
-          cache-dependency-path: backend/requirements.txt
+          cache-dependency-path: backend/requirements-ci.txt
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-ci.txt
       - name: Run tests
         run: pytest tests/ -v
 

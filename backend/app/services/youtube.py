@@ -9,6 +9,7 @@ from googleapiclient.discovery import build
 from youtube_transcript_api import YouTubeTranscriptApi
 
 from app.core.config import get_settings
+from app.core.llm_config import get_whisper_config
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ class YouTubeService:
 
             # Check if Whisper fallback is enabled
             if use_whisper_fallback is None:
-                use_whisper_fallback = self.settings.enable_whisper_fallback
+                use_whisper_fallback = get_whisper_config().fallback_enabled
 
             # Fallback to Whisper if enabled
             if use_whisper_fallback:
