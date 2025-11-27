@@ -71,13 +71,13 @@ def get_session_detail(session_id: str, db: Session = Depends(get_session)):
     messages = db.exec(
         select(Message)
         .where(Message.session_id == session_id)
-        .order_by(Message.created_at)  # type: ignore[arg-type]
+        .order_by(Message.created_at)  # type: ignore
     ).all()
 
     videos = db.exec(
         select(SessionVideo)
         .where(SessionVideo.session_id == session_id)
-        .order_by(SessionVideo.added_at)  # type: ignore[arg-type]
+        .order_by(SessionVideo.added_at)  # type: ignore
     ).all()
 
     return SessionDetailResponse(
