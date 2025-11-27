@@ -41,8 +41,8 @@ def list_sessions(db: Session = Depends(get_session)):
             func.coalesce(video_counts.c.count, 0).label("video_count"),
             func.coalesce(message_counts.c.count, 0).label("message_count"),
         )
-        .outerjoin(video_counts, DBSession.id == video_counts.c.session_id)  # type: ignore[arg-type]
-        .outerjoin(message_counts, DBSession.id == message_counts.c.session_id)  # type: ignore[arg-type]
+        .outerjoin(video_counts, DBSession.id == video_counts.c.session_id)
+        .outerjoin(message_counts, DBSession.id == message_counts.c.session_id)
         .order_by(DBSession.updated_at.desc())
     )
 
@@ -90,13 +90,13 @@ def get_session_detail(session_id: str, db: Session = Depends(get_session)):
     messages = db.exec(
         select(Message)
         .where(Message.session_id == session_id)
-        .order_by(Message.created_at)  # type: ignore[arg-type]
+        .order_by(Message.created_at)
     ).all()
 
     videos = db.exec(
         select(SessionVideo)
         .where(SessionVideo.session_id == session_id)
-        .order_by(SessionVideo.added_at)  # type: ignore[arg-type]
+        .order_by(SessionVideo.added_at)
     ).all()
 
     return SessionDetailResponse(
