@@ -12,6 +12,9 @@ select = [
     "C4",  # flake8-comprehensions
     "UP",  # pyupgrade
 ]
+ignore = [
+    "B008",  # function call in default argument (FastAPI Depends pattern)
+]
 
 [tool.mypy]
 python_version = "3.13"

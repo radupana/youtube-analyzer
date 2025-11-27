@@ -1,11 +1,13 @@
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api_v1.endpoints import chat, settings, transcripts, videos
+from app.api_v1.endpoints import chat, sessions, settings, transcripts, videos
 from app.core.config import get_settings
 from app.core.llm_config import load_config
+from app.db.database import init_db
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -16,11 +18,19 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 app_settings = get_settings()
 load_config()
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
+
+
 app = FastAPI(
     title=app_settings.project_name,
     openapi_url=f"{app_settings.api_v1_str}/openapi.json",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -42,6 +52,9 @@ app.include_router(
 app.include_router(chat.router, prefix=f"{app_settings.api_v1_str}/chat", tags=["chat"])
 app.include_router(
     settings.router, prefix=f"{app_settings.api_v1_str}/settings", tags=["settings"]
+)
+app.include_router(
+    sessions.router, prefix=f"{app_settings.api_v1_str}/sessions", tags=["sessions"]
 )
 
 

@@ -223,6 +223,7 @@ __marimo__/
 !tests/fixtures/*.json
 results/
 .cache/
+.data/
 .checkpoints/
 .state/
 .index/
@@ -242,4 +243,5 @@ frontend/tsconfig.tsbuildinfo
 backend/.venv/
 backend/__pycache__/
 backend/*.db
+backend/file:*
 backend/.env

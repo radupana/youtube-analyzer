@@ -9,6 +9,12 @@ from app.main import app
 client = TestClient(app)
 
 
+def create_session() -> str:
+    """Helper to create a session and return its ID."""
+    response = client.post("/api/v1/sessions", json={"title": "Test Session"})
+    return response.json()["id"]
+
+
 @pytest.fixture
 def mock_provider():
     """Mock the LLM provider for chat tests."""
@@ -47,7 +53,7 @@ def test_send_message(mock_llm_response):
 
 
 def test_send_message_with_session_id(mock_llm_response):
-    session_id = "test-session-123"
+    session_id = create_session()
     response = client.post(
         "/api/v1/chat/message",
         json={"message": "Hello again", "session_id": session_id},
@@ -55,6 +61,16 @@ def test_send_message_with_session_id(mock_llm_response):
     assert response.status_code == 200
     data = response.json()
     assert data["session_id"] == session_id
+
+
+def test_send_message_with_invalid_session_id():
+    """Test that chat returns 404 when session doesn't exist."""
+    response = client.post(
+        "/api/v1/chat/message",
+        json={"message": "Hello", "session_id": "nonexistent-session"},
+    )
+    assert response.status_code == 404
+    assert "Session not found" in response.json()["detail"]
 
 
 def test_send_empty_message():
