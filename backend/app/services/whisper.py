@@ -5,9 +5,13 @@ import os
 import subprocess
 import tempfile
 
-import whisper
 import yt_dlp
 import yt_dlp.utils
+
+try:
+    import whisper
+except ImportError:
+    whisper = None  # type: ignore[assignment]
 
 try:
     from pytube import YouTube
@@ -26,6 +30,10 @@ class WhisperService:
 
     def _load_model(self):
         """Lazy load Whisper model."""
+        if whisper is None:
+            raise RuntimeError(
+                "Whisper is not installed. Install with: pip install openai-whisper"
+            )
         if self.model is None:
             logger.info(f"Loading Whisper model: {self.model_name}")
             self.model = whisper.load_model(self.model_name)
