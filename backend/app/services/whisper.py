@@ -11,7 +11,7 @@ import yt_dlp.utils
 try:
     import whisper
 except ImportError:
-    whisper = None  # type: ignore[assignment]
+    whisper = None
 
 try:
     from pytube import YouTube
