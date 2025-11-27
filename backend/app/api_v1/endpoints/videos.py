@@ -1,11 +1,12 @@
-"""Video management endpoints - single video only."""
+"""Video management endpoints with session persistence."""
 
 import asyncio
 import logging
 import time
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from sqlmodel import Session, select
 
 from app.api_v1.schemas import (
     TaskResponse,
@@ -15,21 +16,20 @@ from app.api_v1.schemas import (
     VideoList,
     VideoStatus,
 )
+from app.db.database import get_engine, get_session
+from app.db.models import Session as DBSession
+from app.db.models import SessionVideo, utc_now
 from app.services.cache import get_cache_service
 from app.services.youtube import YouTubeService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# In-memory storage (would use database in production)
-loaded_videos: dict[str, Video] = {}
 youtube_service = YouTubeService()
 cache_service = get_cache_service()
 
-# Progress tracking
 task_progress: dict[str, dict] = {}
 
-# Error message for unsupported URL types
 UNSUPPORTED_URL_ERROR = (
     "Only single video URLs are supported. "
     "Please provide a URL in the format https://www.youtube.com/watch?v=..."
@@ -37,25 +37,31 @@ UNSUPPORTED_URL_ERROR = (
 
 
 @router.post("/add", response_model=TaskResponse)
-async def add_video(video_request: VideoCreate, background_tasks: BackgroundTasks):
-    """Add a single YouTube video to the context."""
+async def add_video(
+    video_request: VideoCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_session),
+):
+    """Add a single YouTube video to a session."""
     url = video_request.url
+    session_id = video_request.session_id
 
-    # Validate URL type - reject channels and playlists
+    session = db.get(DBSession, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
     if youtube_service.is_channel_url(url):
         raise HTTPException(status_code=400, detail=UNSUPPORTED_URL_ERROR)
 
     if youtube_service.is_playlist_url(url):
         raise HTTPException(status_code=400, detail=UNSUPPORTED_URL_ERROR)
 
-    # Extract video ID
     video_id = youtube_service.extract_video_id(url)
     if not video_id:
         raise HTTPException(status_code=400, detail=UNSUPPORTED_URL_ERROR)
 
     task_id = str(uuid4())
 
-    # Initialize progress tracking
     task_progress[task_id] = {
         "status": TaskStatus.PENDING,
         "progress": 0.0,
@@ -67,10 +73,10 @@ async def add_video(video_request: VideoCreate, background_tasks: BackgroundTask
         "current_step": None,
         "start_time": time.time(),
         "elapsed_time": 0,
+        "session_id": session_id,
     }
 
-    # Process in background
-    background_tasks.add_task(process_single_video, task_id, video_id)
+    background_tasks.add_task(process_single_video, task_id, video_id, session_id)
 
     return TaskResponse(
         task_id=task_id,
@@ -87,32 +93,19 @@ async def get_task_status(task_id: str):
 
     progress = task_progress[task_id]
 
-    # Always compute fresh elapsed time for smooth timer updates
     if progress["status"] not in (TaskStatus.COMPLETED, TaskStatus.FAILED):
         progress["elapsed_time"] = int(time.time() - progress["start_time"])
 
     return progress
 
 
-async def process_single_video(task_id: str, video_id: str):
-    """Process a single YouTube video."""
+async def process_single_video(task_id: str, video_id: str, session_id: str):
+    """Process a single YouTube video and save to session."""
     try:
         task_progress[task_id]["status"] = TaskStatus.RUNNING
         task_progress[task_id]["message"] = "Loading video..."
         task_progress[task_id]["progress"] = 10.0
 
-        # Small delay to ensure UI can fetch initial progress
-        await asyncio.sleep(0.1)
-
-        # Check if already loaded
-        if video_id in loaded_videos:
-            task_progress[task_id]["status"] = TaskStatus.COMPLETED
-            task_progress[task_id]["progress"] = 100.0
-            task_progress[task_id]["message"] = "Video already loaded."
-            task_progress[task_id]["videos_added"].append(video_id)
-            return
-
-        # Check cache first
         cached_video = cache_service.load_video(video_id)
         if cached_video:
             task_progress[task_id]["current_step"] = "cache"
@@ -120,11 +113,12 @@ async def process_single_video(task_id: str, video_id: str):
             task_progress[task_id]["progress"] = 50.0
 
             video = Video(**cached_video)
-            loaded_videos[video_id] = video
             task_progress[task_id]["videos_added"].append(video_id)
             task_progress[task_id]["current_video"] = (
                 video.title[:50] + "..." if len(video.title) > 50 else video.title
             )
+
+            await save_video_to_session(session_id, video)
 
             task_progress[task_id]["status"] = TaskStatus.COMPLETED
             task_progress[task_id]["progress"] = 100.0
@@ -132,7 +126,6 @@ async def process_single_video(task_id: str, video_id: str):
             task_progress[task_id]["processed"] = 1
             return
 
-        # Fetch from YouTube
         task_progress[task_id]["current_step"] = "metadata"
         task_progress[task_id]["message"] = "Fetching video metadata..."
         task_progress[task_id]["progress"] = 20.0
@@ -150,7 +143,6 @@ async def process_single_video(task_id: str, video_id: str):
         )
         task_progress[task_id]["progress"] = 30.0
 
-        # Create video object
         video = Video(
             id=video_id,
             title=video_info["title"],
@@ -165,22 +157,18 @@ async def process_single_video(task_id: str, video_id: str):
             like_count=video_info.get("like_count", 0),
         )
 
-        loaded_videos[video_id] = video
         task_progress[task_id]["videos_added"].append(video_id)
 
-        # Get transcript
         task_progress[task_id]["current_step"] = "transcript"
         task_progress[task_id]["message"] = "Fetching transcript..."
         task_progress[task_id]["progress"] = 40.0
 
-        # Create progress callback for Whisper
         def whisper_progress(step: str, message: str):
             task_progress[task_id]["current_step"] = step
             task_progress[task_id]["message"] = message
             task_progress[task_id]["elapsed_time"] = int(
                 time.time() - task_progress[task_id]["start_time"]
             )
-            # Update progress based on whisper step
             if step == "whisper_downloading":
                 task_progress[task_id]["progress"] = 50.0
             elif step == "whisper_loading":
@@ -188,8 +176,6 @@ async def process_single_video(task_id: str, video_id: str):
             elif step == "whisper_transcribing":
                 task_progress[task_id]["progress"] = 70.0
 
-        # Run the blocking transcript fetch in a thread to not block the event loop
-        # This allows progress polling to work during Whisper transcription
         transcript, source = await asyncio.to_thread(
             youtube_service.get_transcript, video_id, None, whisper_progress
         )
@@ -205,7 +191,6 @@ async def process_single_video(task_id: str, video_id: str):
             else:
                 task_progress[task_id]["message"] = "Got YouTube captions"
 
-            # Save to cache
             cache_service.save_video(video.model_dump())
         else:
             video.status = VideoStatus.ERROR
@@ -213,7 +198,8 @@ async def process_single_video(task_id: str, video_id: str):
             logger.warning(f"No transcript available for {video.title}")
             cache_service.save_video(video.model_dump())
 
-        # Complete
+        await save_video_to_session(session_id, video)
+
         task_progress[task_id]["status"] = TaskStatus.COMPLETED
         task_progress[task_id]["progress"] = 100.0
         task_progress[task_id]["processed"] = 1
@@ -228,91 +214,159 @@ async def process_single_video(task_id: str, video_id: str):
 
     except Exception as e:
         task_progress[task_id]["status"] = TaskStatus.FAILED
-        task_progress[task_id]["message"] = f"Error: {str(e)}"
+        task_progress[task_id]["message"] = f"Error: {e!s}"
         logger.error(f"Error processing video: {e}")
+
+
+async def save_video_to_session(session_id: str, video: Video):
+    """Save video to database session."""
+    with Session(get_engine()) as db:
+        session = db.get(DBSession, session_id)
+        if not session:
+            return
+
+        existing = db.exec(
+            select(SessionVideo)
+            .where(SessionVideo.session_id == session_id)
+            .where(SessionVideo.video_id == video.id)
+        ).first()
+
+        if existing:
+            existing.transcript = video.transcript
+            existing.transcript_source = video.transcript_source
+            db.add(existing)
+        else:
+            session_video = SessionVideo(
+                session_id=session_id,
+                video_id=video.id,
+                title=video.title,
+                channel_title=video.channel_title,
+                transcript=video.transcript,
+                transcript_source=video.transcript_source,
+            )
+            db.add(session_video)
+
+        session.updated_at = utc_now()
+        db.add(session)
+        db.commit()
+
+
+@router.get("/session/{session_id}", response_model=VideoList)
+async def list_session_videos(
+    session_id: str,
+    db: Session = Depends(get_session),
+):
+    """List all videos in a session."""
+    session = db.get(DBSession, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session_videos = db.exec(
+        select(SessionVideo).where(SessionVideo.session_id == session_id)
+    ).all()
+
+    videos = []
+    for sv in session_videos:
+        cached = cache_service.load_video(sv.video_id)
+        if cached:
+            videos.append(Video(**cached))
+        else:
+            videos.append(
+                Video(
+                    id=sv.video_id,
+                    title=sv.title,
+                    channel_id="",
+                    channel_title=sv.channel_title,
+                    duration="",
+                    published_at=sv.added_at,
+                    status=VideoStatus.READY if sv.transcript else VideoStatus.ERROR,
+                    transcript=sv.transcript,
+                    transcript_source=sv.transcript_source,
+                )
+            )
+
+    return VideoList(videos=videos, total=len(videos))
+
+
+@router.delete("/session/{session_id}/video/{video_id}")
+async def remove_video_from_session(
+    session_id: str,
+    video_id: str,
+    db: Session = Depends(get_session),
+):
+    """Remove a video from a session."""
+    session_video = db.exec(
+        select(SessionVideo)
+        .where(SessionVideo.session_id == session_id)
+        .where(SessionVideo.video_id == video_id)
+    ).first()
+
+    if not session_video:
+        raise HTTPException(status_code=404, detail="Video not found in session")
+
+    db.delete(session_video)
+    db.commit()
+
+    return {"success": True}
 
 
 @router.get("/cache/load")
 async def load_from_cache():
-    """Load all cached videos into memory on startup."""
+    """List all cached videos (for debugging)."""
     cached_ids = cache_service.list_cached_videos()
-    loaded_count = 0
-
-    for video_id in cached_ids:
-        if video_id not in loaded_videos:
-            cached_video = cache_service.load_video(video_id)
-            if cached_video:
-                video = Video(**cached_video)
-                loaded_videos[video_id] = video
-                loaded_count += 1
-
     return {
         "success": True,
         "cached_videos": len(cached_ids),
-        "loaded_videos": loaded_count,
-        "message": f"Loaded {loaded_count} videos from cache",
+        "video_ids": cached_ids,
     }
 
 
 @router.get("", response_model=VideoList)
-async def list_videos(
-    skip: int = 0,
-    limit: int = 100,
-    status: VideoStatus | None = None,
-):
-    """List all loaded videos."""
-    videos = list(loaded_videos.values())
-
-    if status:
-        videos = [v for v in videos if v.status == status]
-
-    return VideoList(
-        videos=videos[skip : skip + limit],
-        total=len(videos),
-    )
+async def list_videos():
+    """List all cached videos."""
+    cached_ids = cache_service.list_cached_videos()
+    videos = []
+    for video_id in cached_ids:
+        cached = cache_service.load_video(video_id)
+        if cached:
+            videos.append(Video(**cached))
+    return VideoList(videos=videos, total=len(videos))
 
 
 @router.get("/{video_id}", response_model=Video)
 async def get_video(video_id: str):
-    """Get a specific video by ID."""
-    if video_id not in loaded_videos:
+    """Get a specific video by ID from cache."""
+    cached = cache_service.load_video(video_id)
+    if not cached:
         raise HTTPException(status_code=404, detail="Video not found")
-    return loaded_videos[video_id]
+    return Video(**cached)
 
 
 @router.delete("/{video_id}")
 async def delete_video(video_id: str):
-    """Remove a video from the context."""
-    if video_id not in loaded_videos:
+    """Remove a video from cache (not from sessions)."""
+    if not cache_service.has_video(video_id):
         raise HTTPException(status_code=404, detail="Video not found")
 
-    del loaded_videos[video_id]
-    return {"success": True, "message": "Video removed from context"}
+    return {"success": True, "message": "Video removed from cache"}
 
 
 @router.delete("/cache/clear")
 async def clear_cache():
-    """Clear all loaded videos and cache."""
-    # Clear memory
-    memory_count = len(loaded_videos)
-    loaded_videos.clear()
+    """Clear all video cache."""
     task_progress.clear()
-
-    # Clear disk cache
     disk_count = cache_service.clear_cache()
 
-    # Also clear Whisper model cache to free memory
     try:
         from app.services.whisper import WhisperService
 
         whisper_service = WhisperService()
         whisper_service.model = None
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Could not clear Whisper model: {e}")
 
     return {
         "success": True,
         "message": "Cache cleared",
-        "memory_videos_cleared": memory_count,
         "disk_videos_cleared": disk_count,
     }

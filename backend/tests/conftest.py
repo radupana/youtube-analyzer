@@ -1,9 +1,21 @@
 import os
+from collections.abc import Generator
 
 import pytest
+from sqlmodel import Session, SQLModel, create_engine
 
 os.environ.setdefault("YOUTUBE_API_KEY", "test-youtube-key")
 os.environ.setdefault("GEMINI_API_KEY", "test-gemini-key")
+
+
+@pytest.fixture
+def db_session() -> Generator[Session]:
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}
+    )
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        yield session
 
 
 @pytest.fixture

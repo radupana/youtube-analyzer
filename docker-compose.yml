@@ -14,6 +14,7 @@ services:
     volumes:
       - ./backend:/app
       - ./.cache:/app/.cache
+      - ./.data:/app/.data
       - ./config.yaml:/app/config.yaml:ro
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 

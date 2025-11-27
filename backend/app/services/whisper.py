@@ -286,8 +286,6 @@ class WhisperService:
 
                 # Get audio duration for progress estimation
                 try:
-                    import subprocess
-
                     result = subprocess.run(
                         [
                             "ffprobe",

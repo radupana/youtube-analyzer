@@ -18,7 +18,7 @@ jobs:
         with:
           python-version: '3.13'
       - name: Install linters
-        run: pip install ruff mypy types-PyYAML pydantic pydantic-settings fastapi litellm pyyaml
+        run: pip install ruff mypy types-PyYAML pydantic pydantic-settings fastapi litellm pyyaml sqlmodel
       - name: Ruff check
         run: ruff check .
       - name: Ruff format check

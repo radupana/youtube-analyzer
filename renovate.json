@@ -1,0 +1,31 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "labels": ["dependencies"],
+  "rangeStrategy": "bump",
+  "pip_requirements": {
+    "fileMatch": ["backend/requirements\\.txt$", "backend/requirements-ci\\.txt$"]
+  },
+  "packageRules": [
+    {
+      "matchManagers": ["pip_requirements"],
+      "groupName": "python dependencies"
+    },
+    {
+      "matchManagers": ["npm"],
+      "groupName": "npm dependencies"
+    },
+    {
+      "matchManagers": ["pep621"],
+      "groupName": "pyproject.toml dependencies"
+    },
+    {
+      "matchPackageNames": ["openai-whisper"],
+      "enabled": false,
+      "description": "Whisper updates can break transcription - update manually"
+    }
+  ],
+  "schedule": ["before 9am on monday"]
+}

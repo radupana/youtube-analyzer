@@ -1,19 +1,24 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-
-interface Video {
-  id: string
-  title: string
-  channel_title: string
-  status: string
-  transcript?: string
-  transcript_source?: string
-}
+import { SessionSidebar } from "@/components/session-sidebar"
+import {
+  Video,
+  fetchSession,
+  fetchSessionVideos,
+  addVideo,
+  removeVideo,
+  fetchTaskProgress,
+  sendChatMessage,
+  fetchProviders,
+  fetchCurrentProvider,
+  setProvider,
+  createSession,
+} from "@/lib/api"
 
 interface ChatMessage {
   role: "user" | "assistant"
@@ -23,10 +28,7 @@ interface ChatMessage {
 interface TaskProgress {
   status: string
   progress: number
-  total: number
-  processed: number
   message: string
-  videos_added: string[]
   current_video?: string
   current_step?: string
   elapsed_time?: number
@@ -39,6 +41,8 @@ interface LLMProvider {
 }
 
 export default function Home() {
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [sessionTitle, setSessionTitle] = useState<string>("")
   const [videos, setVideos] = useState<Video[]>([])
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [inputUrl, setInputUrl] = useState("")
@@ -50,88 +54,119 @@ export default function Home() {
   const [taskProgress, setTaskProgress] = useState<TaskProgress | null>(null)
   const [providers, setProviders] = useState<LLMProvider[]>([])
   const [currentProvider, setCurrentProvider] = useState<LLMProvider | null>(null)
+  const [initializing, setInitializing] = useState(true)
 
-  // Fetch LLM providers on mount
+  const loadSession = useCallback(async (sid: string) => {
+    try {
+      const [session, sessionVideos] = await Promise.all([
+        fetchSession(sid),
+        fetchSessionVideos(sid),
+      ])
+      setSessionId(sid)
+      setSessionTitle(session.title)
+      setVideos(sessionVideos)
+      setMessages(
+        session.messages.map(m => ({
+          role: m.role as "user" | "assistant",
+          content: m.content,
+        }))
+      )
+      localStorage.setItem("youtube-analyzer-session", sid)
+    } catch (error) {
+      console.error("Failed to load session:", error)
+    }
+  }, [])
+
   useEffect(() => {
-    const fetchProviders = async () => {
+    const init = async () => {
+      const savedSessionId = localStorage.getItem("youtube-analyzer-session")
+      if (savedSessionId) {
+        try {
+          await loadSession(savedSessionId)
+        } catch {
+          localStorage.removeItem("youtube-analyzer-session")
+        }
+      }
+      setInitializing(false)
+    }
+    init()
+  }, [loadSession])
+
+  useEffect(() => {
+    const loadProviders = async () => {
       try {
-        const [providersRes, currentRes] = await Promise.all([
-          fetch("http://localhost:8000/api/v1/settings/llm-providers"),
-          fetch("http://localhost:8000/api/v1/settings/llm-provider"),
+        const [providersList, current] = await Promise.all([
+          fetchProviders(),
+          fetchCurrentProvider(),
         ])
-        if (providersRes.ok) {
-          setProviders(await providersRes.json())
-        }
-        if (currentRes.ok) {
-          setCurrentProvider(await currentRes.json())
-        }
+        setProviders(providersList)
+        setCurrentProvider(current)
       } catch (error) {
         console.error("Error fetching providers:", error)
       }
     }
-    fetchProviders()
+    loadProviders()
   }, [])
 
-  // Poll for videos periodically
-  useEffect(() => {
-    const fetchVideos = async () => {
-      try {
-        const response = await fetch("http://localhost:8000/api/v1/videos")
-        const data = await response.json()
-        setVideos(data.videos)
-      } catch (error) {
-        console.error("Error fetching videos:", error)
-      }
-    }
-
-    fetchVideos()
-    const interval = setInterval(fetchVideos, 2000) // Poll every 2 seconds
-    return () => clearInterval(interval)
-  }, [])
-
-  // Poll for task progress
   useEffect(() => {
     if (!currentTask) return
 
     const interval = setInterval(async () => {
       try {
-        const response = await fetch(`http://localhost:8000/api/v1/videos/task/${currentTask}`)
-        if (response.ok) {
-          const progress = await response.json()
-          setTaskProgress(progress)
+        const progress = await fetchTaskProgress(currentTask)
+        setTaskProgress(progress)
 
-          if (progress.status === "completed" || progress.status === "failed") {
-            setLoading(false)
-            setCurrentTask(null)
-            setTimeout(() => setTaskProgress(null), 3000) // Clear progress after 3 seconds
+        if (progress.status === "completed" || progress.status === "failed") {
+          setLoading(false)
+          setCurrentTask(null)
+          if (sessionId) {
+            const videos = await fetchSessionVideos(sessionId)
+            setVideos(videos)
           }
+          setTimeout(() => setTaskProgress(null), 3000)
         }
       } catch (error) {
         console.error("Error fetching task progress:", error)
       }
-    }, 500) // Poll every 500ms for progress
+    }, 500)
 
     return () => clearInterval(interval)
-  }, [currentTask])
+  }, [currentTask, sessionId])
 
-  // Basic frontend validation for URL type
+  const handleSessionSelect = async (sid: string) => {
+    await loadSession(sid)
+  }
+
+  const handleSessionCreated = async (sid: string) => {
+    await loadSession(sid)
+  }
+
+  const handleSessionDeleted = async (deletedId: string, newActiveId: string | null) => {
+    if (newActiveId) {
+      await loadSession(newActiveId)
+    } else {
+      const session = await createSession("New Session")
+      await loadSession(session.id)
+    }
+  }
+
   const isChannelUrl = (url: string) => {
-    return /@[^/\s]+/.test(url) ||
-           /\/channel\//.test(url) ||
-           /\/c\//.test(url) ||
-           /\/user\//.test(url)
+    return /@[^/\s]+/.test(url) || /\/channel\//.test(url) || /\/c\//.test(url) || /\/user\//.test(url)
   }
 
   const isPlaylistOnlyUrl = (url: string) => {
-    // Reject playlist pages without a video
     if (url.includes("list=") && !url.includes("watch?v=")) return true
-    return url.includes("/playlist?");
+    return url.includes("/playlist?")
   }
 
   const handleAddVideo = async () => {
     setUrlError(null)
 
-    // Frontend validation
+    if (!sessionId) {
+      setUrlError("No session selected. Please create or select a session.")
+      return
+    }
+
     if (isChannelUrl(inputUrl)) {
       setUrlError("Only single video URLs are supported. Please paste a video URL, not a channel.")
       return
@@ -145,86 +180,44 @@ export default function Home() {
     setTaskProgress(null)
 
     try {
-      const response = await fetch("http://localhost:8000/api/v1/videos/add", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: inputUrl }),
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        setUrlError(errorData.detail || "Failed to add video")
-        setLoading(false)
-        return
-      }
-
-      const data = await response.json()
+      const data = await addVideo(inputUrl, sessionId)
       setCurrentTask(data.task_id)
       setInputUrl("")
     } catch (error) {
-      console.error("Error adding video:", error)
-      setUrlError("Failed to add video. Check if the backend is running.")
+      setUrlError(error instanceof Error ? error.message : "Failed to add video")
       setLoading(false)
     }
   }
 
   const handleRemoveVideo = async (videoId: string) => {
+    if (!sessionId) return
+
     try {
-      const response = await fetch(`http://localhost:8000/api/v1/videos/${videoId}`, {
-        method: "DELETE",
-      })
-
-      if (!response.ok) {
-        throw new Error("Failed to remove video")
-      }
-
-      // Refresh video list
-      const videosResponse = await fetch("http://localhost:8000/api/v1/videos")
-      const videosData = await videosResponse.json()
-      setVideos(videosData.videos)
+      await removeVideo(sessionId, videoId)
+      const updatedVideos = await fetchSessionVideos(sessionId)
+      setVideos(updatedVideos)
     } catch (error) {
       console.error("Error removing video:", error)
     }
   }
 
   const handleSendMessage = async () => {
-    if (!chatInput.trim()) return
+    if (!chatInput.trim() || !sessionId) return
 
     const userMessage: ChatMessage = { role: "user", content: chatInput }
-    setMessages([...messages, userMessage])
-    const messageText = chatInput // Save the message before clearing
+    setMessages(prev => [...prev, userMessage])
+    const messageText = chatInput
     setChatInput("")
     setSendingMessage(true)
 
     try {
-      const response = await fetch("http://localhost:8000/api/v1/chat/message", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: messageText }),
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        const errorMessage: ChatMessage = {
-          role: "assistant",
-          content: `Error: ${data.detail || "Failed to get response"}`,
-        }
-        setMessages(prev => [...prev, errorMessage])
-        setSendingMessage(false)
-        return
-      }
-
-      const assistantMessage: ChatMessage = {
-        role: "assistant",
-        content: data.response,
-      }
+      const data = await sendChatMessage(messageText, sessionId)
+      const assistantMessage: ChatMessage = { role: "assistant", content: data.response }
       setMessages(prev => [...prev, assistantMessage])
     } catch (error) {
-      console.error("Error sending message:", error)
       const errorMessage: ChatMessage = {
         role: "assistant",
-        content: "Error: Cannot connect to backend. Is it running?",
+        content: `Error: ${error instanceof Error ? error.message : "Failed to get response"}`,
       }
       setMessages(prev => [...prev, errorMessage])
     }
@@ -233,14 +226,9 @@ export default function Home() {
 
   const handleProviderChange = async (providerId: string) => {
     try {
-      const response = await fetch("http://localhost:8000/api/v1/settings/llm-provider", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: providerId }),
-      })
-      if (response.ok) {
-        setCurrentProvider(await response.json())
-      }
+      await setProvider(providerId)
+      const current = await fetchCurrentProvider()
+      setCurrentProvider(current)
     } catch (error) {
       console.error("Error changing provider:", error)
     }
@@ -248,303 +236,213 @@ export default function Home() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "ready":
-        return "text-green-600"
-      case "processing":
-        return "text-yellow-600"
-      case "error":
-        return "text-red-600"
-      default:
-        return "text-gray-600"
+      case "ready": return "text-green-600"
+      case "processing": return "text-yellow-600"
+      case "error": return "text-red-600"
+      default: return "text-gray-600"
     }
   }
 
   const getStatusText = (status: string) => {
     switch (status) {
-      case "ready":
-        return "Ready"
-      case "processing":
-        return "Processing..."
-      case "error":
-        return "No transcript"
-      default:
-        return status
+      case "ready": return "Ready"
+      case "processing": return "Processing..."
+      case "error": return "No transcript"
+      default: return status
     }
   }
 
-  return (
-    <div className="container mx-auto p-4 max-w-7xl">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-4xl font-bold">YouTube Analyzer</h1>
-        {providers.length > 0 && (
-          <div className="flex items-center gap-2">
-            <Label htmlFor="provider" className="text-sm text-muted-foreground">Model:</Label>
-            <select
-              id="provider"
-              value={currentProvider?.id || ""}
-              onChange={(e) => handleProviderChange(e.target.value)}
-              className="border rounded px-2 py-1 text-sm bg-background"
-            >
-              {providers.map((provider) => (
-                <option key={provider.id} value={provider.id}>
-                  {provider.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
+  if (initializing) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <div className="text-muted-foreground">Loading...</div>
       </div>
+    )
+  }
 
-      <div className="grid grid-cols-3 gap-6 h-[calc(100vh-140px)]">
-        <div className="col-span-1 flex flex-col gap-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Add video</CardTitle>
-              <CardDescription>
-                Paste a YouTube video URL to analyze
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <Label htmlFor="url">YouTube Video URL</Label>
-                <Input
-                  id="url"
-                  type="url"
-                  placeholder="https://youtube.com/watch?v=..."
-                  value={inputUrl}
-                  onChange={(e) => {
-                    setInputUrl(e.target.value)
-                    setUrlError(null)
-                  }}
-                  disabled={loading}
-                  className={urlError ? "border-red-500" : ""}
-                />
-                {urlError && (
-                  <p className="text-sm text-red-500 mt-1">{urlError}</p>
-                )}
-              </div>
-              <Button
-                onClick={handleAddVideo}
-                disabled={loading || !inputUrl}
-                className="w-full"
+  return (
+    <div className="flex h-screen">
+      <SessionSidebar
+        activeSessionId={sessionId}
+        onSessionSelect={handleSessionSelect}
+        onSessionCreated={handleSessionCreated}
+        onSessionDeleted={handleSessionDeleted}
+      />
+
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex justify-between items-center p-4 border-b">
+          <div>
+            <h1 className="text-2xl font-bold">YouTube Analyzer</h1>
+            {sessionTitle && (
+              <p className="text-sm text-muted-foreground">{sessionTitle}</p>
+            )}
+          </div>
+          {providers.length > 0 && (
+            <div className="flex items-center gap-2">
+              <Label htmlFor="provider" className="text-sm text-muted-foreground">Model:</Label>
+              <select
+                id="provider"
+                value={currentProvider?.id || ""}
+                onChange={e => handleProviderChange(e.target.value)}
+                className="border rounded px-2 py-1 text-sm bg-background"
               >
-                {loading ? (
-                  taskProgress && taskProgress.current_step?.startsWith('whisper_') ?
-                    taskProgress.current_step === 'whisper_downloading' ? "Downloading audio..." :
-                    taskProgress.current_step === 'whisper_loading' ? "Loading Whisper..." :
-                    taskProgress.current_step === 'whisper_transcribing' ? "Transcribing..." :
-                    "Processing..." :
-                    "Processing..."
-                ) : "Add video"}
-              </Button>
+                {providers.map(provider => (
+                  <option key={provider.id} value={provider.id}>
+                    {provider.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
 
-              {/* Progress indicator */}
-              {taskProgress && (
-                <div className="mt-4 p-3 border rounded-lg bg-muted/50">
-                  <div className="flex justify-between items-start mb-2">
-                    <div className="flex-1">
-                      <div className="text-sm font-medium">{taskProgress.message}</div>
+        <div className="flex-1 overflow-hidden p-4">
+          <div className="grid grid-cols-3 gap-4 h-full">
+            <div className="col-span-1 flex flex-col gap-4 overflow-hidden">
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg">Add Video</CardTitle>
+                  <CardDescription>Paste a YouTube video URL</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div>
+                    <Input
+                      type="url"
+                      placeholder="https://youtube.com/watch?v=..."
+                      value={inputUrl}
+                      onChange={e => {
+                        setInputUrl(e.target.value)
+                        setUrlError(null)
+                      }}
+                      disabled={loading || !sessionId}
+                      className={urlError ? "border-red-500" : ""}
+                    />
+                    {urlError && <p className="text-sm text-red-500 mt-1">{urlError}</p>}
+                  </div>
+                  <Button
+                    onClick={handleAddVideo}
+                    disabled={loading || !inputUrl || !sessionId}
+                    className="w-full"
+                    size="sm"
+                  >
+                    {loading ? "Processing..." : "Add Video"}
+                  </Button>
+
+                  {taskProgress && (
+                    <div className="p-2 border rounded bg-muted/50 text-sm">
+                      <div className="font-medium">{taskProgress.message}</div>
                       {taskProgress.current_video && (
-                        <div className="text-xs text-muted-foreground mt-1">
-                          {taskProgress.current_video}
-                        </div>
+                        <div className="text-xs text-muted-foreground truncate">{taskProgress.current_video}</div>
                       )}
+                      <div className="w-full bg-gray-200 rounded-full h-1.5 mt-2">
+                        <div
+                          className="bg-primary h-1.5 rounded-full transition-all"
+                          style={{ width: `${taskProgress.progress || 0}%` }}
+                        />
+                      </div>
                     </div>
-                    {taskProgress.elapsed_time !== undefined && taskProgress.elapsed_time > 0 && (
-                      <div className="text-xs text-muted-foreground ml-2">
-                        {Math.floor(taskProgress.elapsed_time / 60)}:{(taskProgress.elapsed_time % 60).toString().padStart(2, '0')}
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card className="flex-1 flex flex-col min-h-0">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg">Videos ({videos.length})</CardTitle>
+                </CardHeader>
+                <CardContent className="flex-1 overflow-y-auto">
+                  {videos.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No videos loaded</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {videos.map(video => (
+                        <li key={video.id} className="p-2 border rounded text-sm">
+                          <div className="flex justify-between items-start gap-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="font-medium truncate" title={video.title}>{video.title}</div>
+                              <div className="text-xs text-muted-foreground">{video.channel_title}</div>
+                              <div className="text-xs mt-1">
+                                <span className={getStatusColor(video.status)}>{getStatusText(video.status)}</span>
+                                {video.transcript_source === "youtube" && <span className="text-green-600"> · Captions</span>}
+                                {video.transcript_source === "whisper" && <span className="text-blue-600"> · Whisper</span>}
+                              </div>
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleRemoveVideo(video.id)}
+                              className="shrink-0 h-6 px-2 text-red-600 hover:text-red-700"
+                            >
+                              ×
+                            </Button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="col-span-2 flex flex-col min-h-0">
+              <Card className="flex-1 flex flex-col min-h-0">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg">Chat</CardTitle>
+                  <CardDescription>Ask questions about your videos</CardDescription>
+                </CardHeader>
+                <CardContent className="flex-1 flex flex-col min-h-0 p-0">
+                  <div className="flex-1 overflow-y-auto px-6 py-2">
+                    {messages.length === 0 ? (
+                      <p className="text-sm text-muted-foreground text-center py-8">
+                        Add a video and ask questions about it
+                      </p>
+                    ) : (
+                      <div className="space-y-3">
+                        {messages.map((message, index) => (
+                          <div
+                            key={index}
+                            className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
+                          >
+                            <div
+                              className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
+                                message.role === "user"
+                                  ? "bg-primary text-primary-foreground"
+                                  : "bg-muted"
+                              }`}
+                            >
+                              <pre className="whitespace-pre-wrap font-sans">{message.content}</pre>
+                            </div>
+                          </div>
+                        ))}
+                        {sendingMessage && (
+                          <div className="flex justify-start">
+                            <div className="bg-muted rounded-lg px-3 py-2 text-sm text-muted-foreground">
+                              Thinking...
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
 
-                  <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
-                    <div
-                      className="bg-primary h-2 rounded-full transition-all duration-300"
-                      style={{ width: `${taskProgress.progress || 0}%` }}
+                  <div className="flex gap-2 p-4 border-t">
+                    <Input
+                      placeholder="Ask about the videos..."
+                      value={chatInput}
+                      onChange={e => setChatInput(e.target.value)}
+                      onKeyDown={e => e.key === "Enter" && !sendingMessage && handleSendMessage()}
+                      disabled={sendingMessage || !sessionId}
                     />
+                    <Button
+                      onClick={handleSendMessage}
+                      disabled={sendingMessage || !chatInput.trim() || !sessionId}
+                    >
+                      Send
+                    </Button>
                   </div>
-
-                  {taskProgress.current_step && (
-                    <div className="text-xs text-muted-foreground">
-                      {taskProgress.current_step === 'cache' && 'Loading from cache...'}
-                      {taskProgress.current_step === 'whisper_downloading' && 'Downloading audio...'}
-                      {taskProgress.current_step === 'whisper_loading' && 'Loading Whisper model...'}
-                      {taskProgress.current_step === 'whisper_transcribing' && 'Transcribing with Whisper...'}
-                      {taskProgress.current_step === 'transcript' && 'Fetching transcript...'}
-                      {taskProgress.current_step === 'metadata' && 'Loading video info...'}
-                    </div>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="flex-1 flex flex-col min-h-0">
-            <CardHeader>
-              <div className="flex justify-between items-center">
-                <CardTitle>Loaded Videos ({videos.length})</CardTitle>
-                {videos.length > 0 && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={async () => {
-                      try {
-                        await fetch("http://localhost:8000/api/v1/videos/cache/clear", {
-                          method: "DELETE",
-                        })
-                        setVideos([])
-                      } catch (error) {
-                        console.error("Error clearing cache:", error)
-                      }
-                    }}
-                    className="text-red-600 hover:text-red-700"
-                  >
-                    Clear All
-                  </Button>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent className="flex-1 min-h-0 overflow-hidden">
-              {videos.length === 0 ? (
-                <p className="text-muted-foreground">No videos loaded</p>
-              ) : (
-                <div className="h-full overflow-y-auto">
-                  <ul className="space-y-2">
-                    {videos.map((video) => (
-                      <li key={video.id} className="p-2 border rounded-lg overflow-hidden">
-                        <div className="flex justify-between items-start">
-                          <div className="flex-1 min-w-0 mr-2">
-                            <div className="font-medium text-sm truncate" title={video.title}>
-                              {video.title}
-                            </div>
-                            <div className="text-muted-foreground text-xs">
-                              {video.channel_title}
-                            </div>
-                            <div className="text-xs mt-1">
-                              <span className={getStatusColor(video.status)}>
-                                {getStatusText(video.status)}
-                              </span>
-                              {video.status === "ready" && video.transcript_source === "youtube" && (
-                                <span className="text-green-600">
-                                  {" "}• 📝 YouTube captions
-                                </span>
-                              )}
-                              {video.status === "ready" && video.transcript_source === "whisper" && (
-                                <span className="text-blue-600">
-                                  {" "}• 🎤 Whisper transcript
-                                </span>
-                              )}
-                              {video.status === "ready" && video.transcript_source === "skipped" && (
-                                <span className="text-gray-500">
-                                  {" "}• Metadata only
-                                </span>
-                              )}
-                              {video.status === "error" && (
-                                <span className="text-red-500">
-                                  {" "}• ❌ No transcript available
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => handleRemoveVideo(video.id)}
-                            className="shrink-0 text-red-600 hover:text-red-700"
-                          >
-                            Remove
-                          </Button>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="col-span-2 flex flex-col">
-          <Card className="flex-1 flex flex-col min-h-0 overflow-hidden">
-            <CardHeader>
-              <CardTitle>Chat</CardTitle>
-              <CardDescription>
-                Ask questions about your loaded videos
-                {videos.filter(v => v.status === "ready" && v.transcript_source === "youtube").length > 0 && (
-                  <span className="text-green-600">
-                    {" "}• {videos.filter(v => v.status === "ready" && v.transcript_source === "youtube").length} with YouTube captions
-                  </span>
-                )}
-                {videos.filter(v => v.status === "ready" && v.transcript_source === "whisper").length > 0 && (
-                  <span className="text-blue-600">
-                    {" "}• {videos.filter(v => v.status === "ready" && v.transcript_source === "whisper").length} with Whisper transcripts
-                  </span>
-                )}
-                {videos.filter(v => v.status === "error").length > 0 && (
-                  <span className="text-red-500">
-                    {" "}• {videos.filter(v => v.status === "error").length} failed
-                  </span>
-                )}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex-1 flex flex-col min-h-0 !p-0">
-              <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
-                <div className="space-y-4">
-                  {messages.length === 0 ? (
-                    <p className="text-muted-foreground text-center">
-                      Add a YouTube video, then ask questions about it!
-                    </p>
-                  ) : (
-                    messages.map((message, index) => (
-                      <div
-                        key={index}
-                        className={`flex ${
-                          message.role === "user" ? "justify-end" : "justify-start"
-                        }`}
-                      >
-                        <div
-                          className={`max-w-[80%] rounded-lg px-4 py-2 ${
-                            message.role === "user"
-                              ? "bg-primary text-primary-foreground"
-                              : "bg-muted"
-                          }`}
-                        >
-                          <pre className="whitespace-pre-wrap font-sans">
-                            {message.content}
-                          </pre>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                  {sendingMessage && (
-                    <div className="flex justify-start">
-                      <div className="bg-muted rounded-lg px-4 py-2">
-                        <span className="text-muted-foreground">Thinking...</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex gap-2 px-6 pb-6">
-                <Input
-                  className="flex-1"
-                  placeholder="Ask about the videos..."
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  onKeyPress={(e) => e.key === "Enter" && !sendingMessage && handleSendMessage()}
-                  disabled={sendingMessage}
-                />
-                <Button
-                  className="shrink-0"
-                  onClick={handleSendMessage}
-                  disabled={sendingMessage || !chatInput.trim()}
-                >
-                  {sendingMessage ? "Sending..." : "Send"}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
         </div>
       </div>
     </div>

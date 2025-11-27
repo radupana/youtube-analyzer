@@ -25,6 +25,7 @@ class VideoCreate(BaseModel):
         ...,
         description="YouTube video URL (e.g., https://youtube.com/watch?v=...)",
     )
+    session_id: str = Field(..., description="Session ID to add video to")
 
 
 class Video(VideoBase):
@@ -42,12 +43,6 @@ class Video(VideoBase):
 class VideoList(BaseModel):
     videos: list[Video]
     total: int
-
-
-class ChatMessage(BaseModel):
-    content: str = Field(..., min_length=1, max_length=10000)
-    role: str = Field("user", pattern="^(user|assistant)$")
-    timestamp: datetime = Field(default_factory=datetime.now)
 
 
 class ChatRequest(BaseModel):
@@ -76,13 +71,55 @@ class TaskResponse(BaseModel):
     error: str | None = None
 
 
-class ApiResponse(BaseModel):
-    success: bool
-    data: dict | None = None
-    error: dict | None = None
+class SessionCreate(BaseModel):
+    title: str | None = Field(None, max_length=200)
 
 
-class ErrorResponse(BaseModel):
-    code: str
-    message: str
-    details: dict | None = None
+class SessionUpdate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+
+
+class SessionResponse(BaseModel):
+    id: str
+    title: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class SessionSummary(BaseModel):
+    id: str
+    title: str
+    created_at: datetime
+    updated_at: datetime
+    video_count: int
+    message_count: int
+
+
+class SessionListResponse(BaseModel):
+    sessions: list[SessionSummary]
+    total: int
+
+
+class MessageResponse(BaseModel):
+    id: str
+    role: str
+    content: str
+    created_at: datetime
+
+
+class SessionVideoResponse(BaseModel):
+    id: str
+    video_id: str
+    title: str
+    channel_title: str
+    transcript_source: str | None
+    added_at: datetime
+
+
+class SessionDetailResponse(BaseModel):
+    id: str
+    title: str
+    created_at: datetime
+    updated_at: datetime
+    messages: list[MessageResponse]
+    videos: list[SessionVideoResponse]

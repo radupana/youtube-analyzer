@@ -1,9 +1,10 @@
-from uuid import uuid4
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from sqlmodel import Session, select
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-
-from app.api_v1.endpoints.videos import loaded_videos
 from app.api_v1.schemas import ChatRequest, ChatResponse
+from app.db.database import get_session
+from app.db.models import Message, SessionVideo, utc_now
+from app.db.models import Session as DBSession
 from app.services.llm import chat_with_context
 
 router = APIRouter()
@@ -11,21 +12,51 @@ router = APIRouter()
 active_connections: list[WebSocket] = []
 
 
-def get_video_context() -> list[dict]:
+def get_video_context_from_session(db: Session, session_id: str) -> list[dict]:
+    videos = db.exec(
+        select(SessionVideo).where(SessionVideo.session_id == session_id)
+    ).all()
     return [
         {
             "title": v.title,
             "channel_title": v.channel_title,
             "transcript": v.transcript,
         }
-        for v in loaded_videos.values()
+        for v in videos
     ]
 
 
 @router.post("/message", response_model=ChatResponse)
-async def send_message(request: ChatRequest):
-    session_id = request.session_id or str(uuid4())
-    response = await chat_with_context(request.message, get_video_context())
+async def send_message(
+    request: ChatRequest,
+    db: Session = Depends(get_session),
+):
+    session_id = request.session_id
+    session: DBSession
+
+    if not session_id:
+        session = DBSession()
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+        session_id = session.id
+    else:
+        existing = db.get(DBSession, session_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="Session not found")
+        session = existing
+
+    video_context = get_video_context_from_session(db, session_id)
+    response = await chat_with_context(request.message, video_context)
+
+    user_msg = Message(session_id=session_id, role="user", content=request.message)
+    assistant_msg = Message(session_id=session_id, role="assistant", content=response)
+    db.add_all([user_msg, assistant_msg])
+
+    session.updated_at = utc_now()
+    db.add(session)
+    db.commit()
+
     return ChatResponse(response=response, session_id=session_id)
 
 
@@ -36,8 +67,10 @@ async def websocket_endpoint(websocket: WebSocket):
 
     try:
         while True:
-            data = await websocket.receive_text()
-            response = await chat_with_context(data, get_video_context())
-            await websocket.send_text(response)
+            await websocket.receive_text()
+            await websocket.send_text(
+                "WebSocket chat not supported with session persistence. "
+                "Use POST /message instead."
+            )
     except WebSocketDisconnect:
         active_connections.remove(websocket)
