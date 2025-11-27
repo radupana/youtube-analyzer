@@ -6,6 +6,8 @@ import os
 from datetime import datetime
 from typing import Any
 
+import numpy as np
+
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -14,14 +16,14 @@ logger = logging.getLogger(__name__)
 class CacheService:
     def __init__(self):
         self.settings = get_settings()
-        # Use CACHE_DIR env var, or default to .cache in current directory
         self.cache_dir = os.environ.get("CACHE_DIR", ".cache")
         self.videos_cache_dir = os.path.join(self.cache_dir, "videos")
         self.transcripts_cache_dir = os.path.join(self.cache_dir, "transcripts")
+        self.chunks_cache_dir = os.path.join(self.cache_dir, "chunks")
 
-        # Ensure cache directories exist
         os.makedirs(self.videos_cache_dir, exist_ok=True)
         os.makedirs(self.transcripts_cache_dir, exist_ok=True)
+        os.makedirs(self.chunks_cache_dir, exist_ok=True)
 
         logger.info(f"Cache initialized at {self.cache_dir}")
 
@@ -32,6 +34,14 @@ class CacheService:
     def _get_transcript_cache_path(self, video_id: str) -> str:
         """Get the cache file path for a transcript."""
         return os.path.join(self.transcripts_cache_dir, f"{video_id}.json")
+
+    def _get_chunks_cache_path(self, video_id: str) -> str:
+        """Get the cache file path for chunks metadata."""
+        return os.path.join(self.chunks_cache_dir, f"{video_id}.json")
+
+    def _get_embeddings_cache_path(self, video_id: str) -> str:
+        """Get the cache file path for embeddings (numpy binary)."""
+        return os.path.join(self.chunks_cache_dir, f"{video_id}.npy")
 
     def save_video(self, video_data: dict[str, Any]) -> bool:
         """Save video metadata and transcript to cache."""
@@ -113,6 +123,58 @@ class CacheService:
         transcript_cache_path = self._get_transcript_cache_path(video_id)
         return os.path.exists(transcript_cache_path)
 
+    def save_chunks(
+        self,
+        video_id: str,
+        chunks: list[dict[str, Any]],
+        embeddings: np.ndarray,
+    ) -> bool:
+        """Save chunks metadata and embeddings to cache."""
+        try:
+            chunks_path = self._get_chunks_cache_path(video_id)
+            embeddings_path = self._get_embeddings_cache_path(video_id)
+
+            with open(chunks_path, "w", encoding="utf-8") as f:
+                json.dump(chunks, f, ensure_ascii=False)
+
+            np.save(embeddings_path, embeddings)
+
+            logger.info(f"Cached {len(chunks)} chunks for video {video_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error caching chunks for {video_id}: {e}")
+            return False
+
+    def load_chunks(
+        self, video_id: str
+    ) -> tuple[list[dict[str, Any]], np.ndarray] | None:
+        """Load chunks metadata and embeddings from cache."""
+        try:
+            chunks_path = self._get_chunks_cache_path(video_id)
+            embeddings_path = self._get_embeddings_cache_path(video_id)
+
+            if not os.path.exists(chunks_path) or not os.path.exists(embeddings_path):
+                return None
+
+            with open(chunks_path, encoding="utf-8") as f:
+                chunks = json.load(f)
+
+            embeddings = np.load(embeddings_path)
+
+            logger.info(f"Loaded {len(chunks)} chunks for video {video_id}")
+            return chunks, embeddings
+
+        except Exception as e:
+            logger.error(f"Error loading chunks for {video_id}: {e}")
+            return None
+
+    def has_chunks(self, video_id: str) -> bool:
+        """Check if chunks exist in cache."""
+        chunks_path = self._get_chunks_cache_path(video_id)
+        embeddings_path = self._get_embeddings_cache_path(video_id)
+        return os.path.exists(chunks_path) and os.path.exists(embeddings_path)
+
     def list_cached_videos(self) -> list[str]:
         """List all cached video IDs."""
         try:
@@ -123,19 +185,21 @@ class CacheService:
             return []
 
     def clear_cache(self) -> int:
-        """Clear all cached videos and transcripts."""
+        """Clear all cached videos, transcripts, and chunks."""
         count = 0
         try:
-            # Clear videos
             for file in os.listdir(self.videos_cache_dir):
                 if file.endswith(".json"):
                     os.remove(os.path.join(self.videos_cache_dir, file))
                     count += 1
 
-            # Clear transcripts
             for file in os.listdir(self.transcripts_cache_dir):
                 if file.endswith(".json"):
                     os.remove(os.path.join(self.transcripts_cache_dir, file))
+
+            for file in os.listdir(self.chunks_cache_dir):
+                if file.endswith((".json", ".npy")):
+                    os.remove(os.path.join(self.chunks_cache_dir, file))
 
             logger.info(f"Cleared {count} videos from cache")
             return count

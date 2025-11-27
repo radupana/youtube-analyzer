@@ -18,6 +18,7 @@ def get_video_context_from_session(db: Session, session_id: str) -> list[dict]:
     ).all()
     return [
         {
+            "video_id": v.video_id,
             "title": v.title,
             "channel_title": v.channel_title,
             "transcript": v.transcript,

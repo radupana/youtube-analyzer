@@ -20,6 +20,7 @@ from app.db.database import get_engine, get_session
 from app.db.models import Session as DBSession
 from app.db.models import SessionVideo, utc_now
 from app.services.cache import get_cache_service
+from app.services.rag import has_rag_data, process_transcript_for_rag
 from app.services.youtube import YouTubeService
 
 logger = logging.getLogger(__name__)
@@ -118,6 +119,14 @@ async def process_single_video(task_id: str, video_id: str, session_id: str):
                 video.title[:50] + "..." if len(video.title) > 50 else video.title
             )
 
+            if video.transcript and not has_rag_data(video_id):
+                task_progress[task_id]["current_step"] = "rag"
+                task_progress[task_id]["message"] = "Processing for search..."
+                task_progress[task_id]["progress"] = 75.0
+                await asyncio.to_thread(
+                    process_transcript_for_rag, video_id, video.transcript
+                )
+
             await save_video_to_session(session_id, video)
 
             task_progress[task_id]["status"] = TaskStatus.COMPLETED
@@ -184,7 +193,7 @@ async def process_single_video(task_id: str, video_id: str, session_id: str):
             video.transcript = transcript
             video.transcript_source = source
             video.status = VideoStatus.READY
-            task_progress[task_id]["progress"] = 90.0
+            task_progress[task_id]["progress"] = 85.0
 
             if source == "whisper":
                 task_progress[task_id]["message"] = "Transcribed with Whisper"
@@ -192,6 +201,11 @@ async def process_single_video(task_id: str, video_id: str, session_id: str):
                 task_progress[task_id]["message"] = "Got YouTube captions"
 
             cache_service.save_video(video.model_dump())
+
+            task_progress[task_id]["current_step"] = "rag"
+            task_progress[task_id]["message"] = "Processing for search..."
+            task_progress[task_id]["progress"] = 90.0
+            await asyncio.to_thread(process_transcript_for_rag, video_id, transcript)
         else:
             video.status = VideoStatus.ERROR
             video.transcript_source = "none"

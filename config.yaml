@@ -19,3 +19,10 @@ default_provider: gemini-flash
 whisper:
   model: base
   fallback_enabled: true
+
+rag:
+  chunk_size: 500
+  chunk_overlap: 50
+  top_k: 10
+  max_context_tokens: 4000
+  embedding_model: all-MiniLM-L6-v2
