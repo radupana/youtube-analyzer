@@ -3,9 +3,11 @@
 import asyncio
 import logging
 import time
+from enum import Enum
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlmodel import Session, select
 
 from app.api_v1.schemas import (
@@ -15,15 +17,22 @@ from app.api_v1.schemas import (
     VideoList,
     VideoStatus,
 )
-from app.api_v1.schemas import (
-    Video as VideoSchema,
-)
+from app.api_v1.schemas import Video as VideoSchema
 from app.db.database import get_engine, get_session
 from app.db.models import Chunk, SessionVideo, Video, utc_now
 from app.db.models import Session as DBSession
 from app.services.embeddings import clear_model
+from app.services.export import export_json, export_markdown, export_srt, export_txt
 from app.services.rag import process_transcript_for_rag
 from app.services.youtube import YouTubeService
+
+
+class ExportFormat(str, Enum):
+    TXT = "txt"
+    MARKDOWN = "md"
+    SRT = "srt"
+    JSON = "json"
+
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -328,6 +337,77 @@ async def list_videos(db: Session = Depends(get_session)):
     return VideoList(
         videos=[_video_to_schema(v) for v in videos],
         total=len(videos),
+    )
+
+
+@router.get("/{video_id}/export")
+async def export_transcript(
+    video_id: str,
+    format: ExportFormat = ExportFormat.TXT,
+    db: Session = Depends(get_session),
+):
+    """Export video transcript in various formats."""
+    video = db.get(Video, video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    if not video.transcript:
+        raise HTTPException(
+            status_code=400,
+            detail="No transcript available for this video",
+        )
+
+    safe_title = "".join(c if c.isalnum() or c in " -_" else "_" for c in video.title)[
+        :50
+    ]
+    filename = f"{safe_title}_{video_id}.{format.value}"
+
+    if format == ExportFormat.TXT:
+        content = export_txt(video)
+        return PlainTextResponse(
+            content,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            media_type="text/plain; charset=utf-8",
+        )
+
+    if format == ExportFormat.MARKDOWN:
+        content = export_markdown(video)
+        return PlainTextResponse(
+            content,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            media_type="text/markdown; charset=utf-8",
+        )
+
+    if format == ExportFormat.SRT:
+        chunks = db.exec(
+            select(Chunk)
+            .where(Chunk.video_id == video_id)
+            .order_by(Chunk.start_time)  # type: ignore[arg-type]
+        ).all()
+
+        if not chunks:
+            raise HTTPException(
+                status_code=400,
+                detail="SRT export requires timestamp data (not available)",
+            )
+
+        content = export_srt(list(chunks))
+        return PlainTextResponse(
+            content,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            media_type="text/srt; charset=utf-8",
+        )
+
+    chunks = db.exec(
+        select(Chunk)
+        .where(Chunk.video_id == video_id)
+        .order_by(Chunk.start_time)  # type: ignore[arg-type]
+    ).all()
+
+    data = export_json(video, list(chunks) if chunks else None)
+    return JSONResponse(
+        data,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
