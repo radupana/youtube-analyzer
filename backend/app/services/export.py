@@ -1,6 +1,6 @@
 """Transcript export formatters."""
 
-from app.db.models import Chunk, Video
+from app.db.models import Chunk, Video, VideoAnalysis
 
 
 def format_timestamp_srt(seconds: float) -> str:
@@ -66,8 +66,14 @@ def export_srt(chunks: list[Chunk]) -> str:
     return "\n".join(lines)
 
 
-def export_json(video: Video, chunks: list[Chunk] | None = None) -> dict:
+def export_json(
+    video: Video,
+    chunks: list[Chunk] | None = None,
+    analysis: VideoAnalysis | None = None,
+) -> dict:
     """Export as structured JSON."""
+    import json
+
     result: dict = {
         "video_id": video.id,
         "title": video.title,
@@ -88,5 +94,15 @@ def export_json(video: Video, chunks: list[Chunk] | None = None) -> dict:
             }
             for chunk in chunks
         ]
+
+    if analysis:
+        result["analysis"] = {
+            "summary": analysis.summary,
+            "key_takeaways": json.loads(analysis.key_takeaways),
+            "main_topics": json.loads(analysis.main_topics),
+            "notable_quotes": json.loads(analysis.notable_quotes),
+            "model_used": analysis.model_used,
+            "created_at": analysis.created_at.isoformat(),
+        }
 
     return result

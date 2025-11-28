@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api_v1.endpoints import chat, sessions, settings, transcripts, videos
+from app.api_v1.endpoints import analysis, chat, sessions, settings, transcripts, videos
 from app.core.config import get_settings
 from app.core.llm_config import load_config
 from app.db.database import init_db
@@ -43,6 +43,9 @@ app.add_middleware(
 
 app.include_router(
     videos.router, prefix=f"{app_settings.api_v1_str}/videos", tags=["videos"]
+)
+app.include_router(
+    analysis.router, prefix=f"{app_settings.api_v1_str}/videos", tags=["analysis"]
 )
 app.include_router(
     transcripts.router,

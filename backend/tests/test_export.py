@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.db.database import get_session
-from app.db.models import Chunk, Video
+from app.db.models import Chunk, Video, VideoAnalysis
 from app.main import app
 from app.services.export import (
     export_json,
@@ -126,6 +126,23 @@ class TestExportJson:
         assert result["segments"][0]["start"] == 0.0
         assert result["segments"][0]["text"] == "Hello world."
 
+    def test_with_analysis(self, sample_video: Video):
+        analysis = VideoAnalysis(
+            video_id="test123",
+            summary="Test summary about the video.",
+            key_takeaways='["Takeaway 1", "Takeaway 2"]',
+            main_topics='["Topic A", "Topic B"]',
+            notable_quotes='["Quote 1"]',
+            model_used="gemini/gemini-2.5-flash",
+        )
+        result = export_json(sample_video, analysis=analysis)
+        assert "analysis" in result
+        assert result["analysis"]["summary"] == "Test summary about the video."
+        assert result["analysis"]["key_takeaways"] == ["Takeaway 1", "Takeaway 2"]
+        assert result["analysis"]["main_topics"] == ["Topic A", "Topic B"]
+        assert result["analysis"]["notable_quotes"] == ["Quote 1"]
+        assert result["analysis"]["model_used"] == "gemini/gemini-2.5-flash"
+
 
 class TestExportEndpoint:
     def test_export_not_found(self):
@@ -234,6 +251,51 @@ class TestExportEndpoint:
             data = response.json()
             assert data["video_id"] == "jsontest"
             assert data["title"] == "JSON Test Video"
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_export_json_with_analysis(self):
+        engine = create_engine(
+            "sqlite:///file:test_json_analysis?mode=memory&cache=shared&uri=true",
+            connect_args={"check_same_thread": False},
+        )
+        SQLModel.metadata.create_all(engine)
+        with Session(engine) as session:
+            video = Video(
+                id="jsonanalysistest",
+                title="JSON Analysis Test",
+                channel_id="UC123",
+                channel_title="Test Channel",
+                description="",
+                duration="PT5M",
+                published_at=datetime(2024, 1, 15, 12, 0, 0, tzinfo=UTC),
+                transcript="Hello world.",
+                transcript_source="youtube",
+            )
+            session.add(video)
+            analysis = VideoAnalysis(
+                video_id="jsonanalysistest",
+                summary="Test summary.",
+                key_takeaways='["Point 1"]',
+                main_topics='["Topic A"]',
+                notable_quotes='["Quote"]',
+                model_used="gemini/gemini-2.5-flash",
+            )
+            session.add(analysis)
+            session.commit()
+
+        def override_session():
+            with Session(engine) as session:
+                yield session
+
+        app.dependency_overrides[get_session] = override_session
+        try:
+            response = client.get("/api/v1/videos/jsonanalysistest/export?format=json")
+            assert response.status_code == 200
+            data = response.json()
+            assert "analysis" in data
+            assert data["analysis"]["summary"] == "Test summary."
+            assert data["analysis"]["key_takeaways"] == ["Point 1"]
         finally:
             app.dependency_overrides.clear()
 

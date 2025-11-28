@@ -1,12 +1,13 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { Copy, Check, Download } from "lucide-react"
+import { Copy, Check, Download, Sparkles, RefreshCw } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { SessionSidebar } from "@/components/session-sidebar"
+import { AnalysisCard } from "@/components/analysis-card"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,6 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import {
   Video,
+  VideoAnalysis,
   ExportFormat,
   fetchSession,
   fetchSessionVideos,
@@ -28,6 +30,8 @@ import {
   createSession,
   exportTranscript,
   copyTranscript,
+  analyzeVideo,
+  getAnalysis,
 } from "@/lib/api"
 
 interface ChatMessage {
@@ -66,6 +70,8 @@ export default function Home() {
   const [currentProvider, setCurrentProvider] = useState<LLMProvider | null>(null)
   const [initializing, setInitializing] = useState(true)
   const [copiedVideoId, setCopiedVideoId] = useState<string | null>(null)
+  const [videoAnalyses, setVideoAnalyses] = useState<Record<string, VideoAnalysis>>({})
+  const [analyzingVideo, setAnalyzingVideo] = useState<string | null>(null)
 
   const loadSession = useCallback(async (sid: string) => {
     try {
@@ -272,6 +278,37 @@ export default function Home() {
     }
   }
 
+  const handleAnalyze = async (videoId: string, forceRegenerate: boolean = false) => {
+    setAnalyzingVideo(videoId)
+    try {
+      const analysis = await analyzeVideo(videoId, forceRegenerate)
+      setVideoAnalyses(prev => ({ ...prev, [videoId]: analysis }))
+    } catch (error) {
+      console.error("Analysis failed:", error)
+    }
+    setAnalyzingVideo(null)
+  }
+
+  useEffect(() => {
+    const loadAnalyses = async () => {
+      for (const video of videos) {
+        if (video.status === "ready" && !videoAnalyses[video.id]) {
+          try {
+            const analysis = await getAnalysis(video.id)
+            if (analysis) {
+              setVideoAnalyses(prev => ({ ...prev, [video.id]: analysis }))
+            }
+          } catch (error) {
+            console.error(`Failed to load analysis for ${video.id}:`, error)
+          }
+        }
+      }
+    }
+    if (videos.length > 0) {
+      loadAnalyses()
+    }
+  }, [videos])
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case "ready": return "text-green-600"
@@ -410,6 +447,20 @@ export default function Home() {
                                   <Button
                                     size="sm"
                                     variant="ghost"
+                                    onClick={() => handleAnalyze(video.id)}
+                                    disabled={analyzingVideo === video.id}
+                                    className="h-6 w-6 p-0"
+                                    title={videoAnalyses[video.id] ? "View analysis" : "Analyze video"}
+                                  >
+                                    {analyzingVideo === video.id ? (
+                                      <RefreshCw className="h-3 w-3 animate-spin" />
+                                    ) : (
+                                      <Sparkles className={`h-3 w-3 ${videoAnalyses[video.id] ? "text-yellow-500" : ""}`} />
+                                    )}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
                                     onClick={() => handleCopy(video.id)}
                                     className="h-6 w-6 p-0"
                                     title="Copy transcript"
@@ -461,7 +512,20 @@ export default function Home() {
               </Card>
             </div>
 
-            <div className="col-span-2 flex flex-col min-h-0">
+            <div className="col-span-2 flex flex-col min-h-0 gap-4">
+              {videos.filter(v => videoAnalyses[v.id]).length > 0 && (
+                <div className="space-y-0 max-h-[40%] overflow-y-auto">
+                  {videos.filter(v => videoAnalyses[v.id]).map(video => (
+                    <AnalysisCard
+                      key={video.id}
+                      analysis={videoAnalyses[video.id]}
+                      videoTitle={video.title}
+                      onRegenerate={() => handleAnalyze(video.id, true)}
+                      isRegenerating={analyzingVideo === video.id}
+                    />
+                  ))}
+                </div>
+              )}
               <Card className="flex-1 flex flex-col min-h-0">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-lg">Chat</CardTitle>
