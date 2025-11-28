@@ -380,9 +380,7 @@ async def export_transcript(
 
     if format == ExportFormat.SRT:
         chunks = db.exec(
-            select(Chunk)
-            .where(Chunk.video_id == video_id)
-            .order_by(Chunk.start_time)  # type: ignore[arg-type]
+            select(Chunk).where(Chunk.video_id == video_id).order_by(Chunk.start_time)  # type: ignore[arg-type]
         ).all()
 
         if not chunks:
@@ -399,9 +397,7 @@ async def export_transcript(
         )
 
     chunks = db.exec(
-        select(Chunk)
-        .where(Chunk.video_id == video_id)
-        .order_by(Chunk.start_time)  # type: ignore[arg-type]
+        select(Chunk).where(Chunk.video_id == video_id).order_by(Chunk.start_time)  # type: ignore[arg-type]
     ).all()
 
     data = export_json(video, list(chunks) if chunks else None)
