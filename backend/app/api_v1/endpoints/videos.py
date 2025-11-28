@@ -109,30 +109,32 @@ async def process_single_video(task_id: str, video_id: str, session_id: str):
 
         with Session(get_engine()) as db:
             existing_video = db.get(Video, video_id)
+            if existing_video:
+                cached_title = existing_video.title
+                cached_transcript = existing_video.transcript
 
         if existing_video:
             task_progress[task_id]["current_step"] = "cache"
             task_progress[task_id]["message"] = "Loading from database..."
             task_progress[task_id]["progress"] = 50.0
             task_progress[task_id]["videos_added"].append(video_id)
-            title = existing_video.title
             task_progress[task_id]["current_video"] = (
-                title[:50] + "..." if len(title) > 50 else title
+                cached_title[:50] + "..." if len(cached_title) > 50 else cached_title
             )
 
-            if existing_video.transcript and not has_rag_data(video_id):
+            if cached_transcript and not has_rag_data(video_id):
                 task_progress[task_id]["current_step"] = "rag"
                 task_progress[task_id]["message"] = "Processing for search..."
                 task_progress[task_id]["progress"] = 75.0
                 await asyncio.to_thread(
-                    process_transcript_for_rag, video_id, existing_video.transcript
+                    process_transcript_for_rag, video_id, cached_transcript
                 )
 
             await _link_video_to_session(session_id, video_id)
 
             task_progress[task_id]["status"] = TaskStatus.COMPLETED
             task_progress[task_id]["progress"] = 100.0
-            task_progress[task_id]["message"] = f"Loaded from database: {title}"
+            task_progress[task_id]["message"] = f"Loaded from database: {cached_title}"
             task_progress[task_id]["processed"] = 1
             return
 
