@@ -10,6 +10,7 @@ from youtube_transcript_api import YouTubeTranscriptApi
 
 from app.core.config import get_settings
 from app.core.llm_config import get_whisper_config
+from app.services.chunking import TranscriptSegment
 
 logger = logging.getLogger(__name__)
 
@@ -90,40 +91,36 @@ class YouTubeService:
         video_id: str,
         use_whisper_fallback: bool | None = None,
         progress_callback: Any = None,
-    ) -> tuple[str | None, str]:
-        """
-        Get transcript for a video (YouTube captions or Whisper fallback).
-        Returns: (transcript_text, source) where source is 'youtube' or 'whisper'
-        """
+    ) -> tuple[str | None, str, list[TranscriptSegment] | None]:
+        """Get transcript for a video (YouTube captions or Whisper fallback)."""
         try:
-            # Try YouTube transcript API first (v1.x API)
             logger.info(f"Attempting to fetch YouTube transcript for {video_id}")
             ytt_api = YouTubeTranscriptApi()
 
-            # Try English first, then fall back to any available language
             try:
                 transcript = ytt_api.fetch(video_id, languages=["en"])
                 logger.info("Found English transcript")
             except Exception:
-                # Try to get any transcript (will get first available)
                 transcript = ytt_api.fetch(video_id)
                 logger.info("Using auto-detected language transcript")
 
-            # Combine all text - transcript is iterable with text/start/duration
-            text_parts = [entry.text for entry in transcript]
+            segments = [
+                TranscriptSegment(
+                    text=entry.text, start=entry.start, duration=entry.duration
+                )
+                for entry in transcript
+            ]
+            text_parts = [seg.text for seg in segments]
             result = " ".join(text_parts)
             logger.info(f"Transcript fetched successfully ({len(result)} chars)")
-            return result, "youtube"
+            return result, "youtube", segments
 
         except Exception as e:
             logger.error(f"YouTube transcript not available: {e}")
-            logger.exception("Full traceback:")
 
-            # Check if Whisper fallback is enabled
             if use_whisper_fallback is None:
                 use_whisper_fallback = get_whisper_config().fallback_enabled
 
-            # Fallback to Whisper if enabled
             if use_whisper_fallback:
                 try:
                     from app.services.whisper import WhisperService
@@ -133,8 +130,8 @@ class YouTubeService:
                         video_id, progress_callback
                     )
                     if whisper_transcript:
-                        return whisper_transcript, "whisper"
+                        return whisper_transcript, "whisper", None
                 except Exception as whisper_error:
                     logger.error(f"Whisper fallback also failed: {whisper_error}")
 
-            return None, "none"
+            return None, "none", None

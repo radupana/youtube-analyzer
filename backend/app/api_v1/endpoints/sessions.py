@@ -12,7 +12,7 @@ from app.api_v1.schemas import (
     SessionVideoResponse,
 )
 from app.db.database import get_session
-from app.db.models import Message, SessionVideo, utc_now
+from app.db.models import Message, SessionVideo, Video, utc_now
 from app.db.models import Session as DBSession
 
 router = APIRouter()
@@ -93,11 +93,26 @@ def get_session_detail(session_id: str, db: Session = Depends(get_session)):
         .order_by(Message.created_at)  # type: ignore[arg-type]
     ).all()
 
-    videos = db.exec(
+    session_videos = db.exec(
         select(SessionVideo)
         .where(SessionVideo.session_id == session_id)
         .order_by(SessionVideo.added_at)  # type: ignore[arg-type]
     ).all()
+
+    video_responses = []
+    for sv in session_videos:
+        video = db.get(Video, sv.video_id)
+        if video:
+            video_responses.append(
+                SessionVideoResponse(
+                    id=sv.id,
+                    video_id=video.id,
+                    title=video.title,
+                    channel_title=video.channel_title,
+                    transcript_source=video.transcript_source,
+                    added_at=sv.added_at,
+                )
+            )
 
     return SessionDetailResponse(
         id=session.id,
@@ -113,17 +128,7 @@ def get_session_detail(session_id: str, db: Session = Depends(get_session)):
             )
             for m in messages
         ],
-        videos=[
-            SessionVideoResponse(
-                id=v.id,
-                video_id=v.video_id,
-                title=v.title,
-                channel_title=v.channel_title,
-                transcript_source=v.transcript_source,
-                added_at=v.added_at,
-            )
-            for v in videos
-        ],
+        videos=video_responses,
     )
 
 

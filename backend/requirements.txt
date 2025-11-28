@@ -17,6 +17,11 @@ ffmpeg-python>=0.2.0
 # LLM
 litellm>=1.50.0
 
+# RAG (Retrieval-Augmented Generation)
+sentence-transformers>=3.0.0
+faiss-cpu>=1.8.0
+tiktoken>=0.7.0
+
 # Database
 sqlmodel>=0.0.27
 
