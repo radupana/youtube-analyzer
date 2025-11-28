@@ -1,3 +1,5 @@
+from typing import Any
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -7,6 +9,9 @@ from app.core.llm_config import (
     get_providers,
     set_current_provider,
 )
+from app.services import embeddings as emb_module
+from app.services.whisper import get_model_info as get_whisper_info
+from app.services.whisper import unload_model as unload_whisper
 
 router = APIRouter()
 
@@ -45,3 +50,31 @@ async def set_provider(request: SetProviderRequest) -> ProviderResponse:
         )
     set_current_provider(request.id)
     return ProviderResponse(id=provider.id, name=provider.name, model=provider.model)
+
+
+@router.get("/models/status")
+async def get_models_status() -> dict[str, Any]:
+    """Get status of loaded AI models."""
+    return {
+        "whisper": get_whisper_info(),
+        "embeddings": {"loaded": emb_module._model is not None},
+    }
+
+
+@router.post("/models/unload")
+async def unload_models(
+    whisper: bool = True,
+    embeddings: bool = True,
+) -> dict[str, Any]:
+    """Manually unload AI models to free memory."""
+    unloaded = []
+
+    if whisper:
+        unload_whisper()
+        unloaded.append("whisper")
+
+    if embeddings:
+        emb_module.clear_model()
+        unloaded.append("embeddings")
+
+    return {"unloaded": unloaded}

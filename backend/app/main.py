@@ -1,6 +1,7 @@
 import logging
 from contextlib import asynccontextmanager
 
+import psutil
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -8,6 +9,8 @@ from app.api_v1.endpoints import analysis, chat, sessions, settings, transcripts
 from app.core.config import get_settings
 from app.core.llm_config import load_config
 from app.db.database import init_db
+from app.services import embeddings as emb_module
+from app.services.whisper import get_model_info as get_whisper_info
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -63,4 +66,17 @@ app.include_router(
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    process = psutil.Process()
+    memory_info = process.memory_info()
+
+    return {
+        "status": "healthy",
+        "memory": {
+            "rss_mb": round(memory_info.rss / 1024 / 1024, 1),
+            "vms_mb": round(memory_info.vms / 1024 / 1024, 1),
+        },
+        "models": {
+            "whisper": get_whisper_info(),
+            "embeddings": {"loaded": emb_module._model is not None},
+        },
+    }

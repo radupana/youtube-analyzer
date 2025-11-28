@@ -228,6 +228,7 @@ class TestWhisperConfig:
         config = get_whisper_config()
         assert config.model == "base"
         assert config.fallback_enabled is True
+        assert config.unload_timeout == 300
 
     def test_whisper_config_from_yaml(self, monkeypatch, tmp_path):
         monkeypatch.setenv("API_KEY", "test-key")
@@ -244,6 +245,7 @@ class TestWhisperConfig:
             "whisper": {
                 "model": "large",
                 "fallback_enabled": False,
+                "unload_timeout": 60,
             },
         }
         config_file = tmp_path / "config.yaml"
@@ -254,6 +256,7 @@ class TestWhisperConfig:
         whisper_cfg = get_whisper_config()
         assert whisper_cfg.model == "large"
         assert whisper_cfg.fallback_enabled is False
+        assert whisper_cfg.unload_timeout == 60
 
     def test_whisper_config_defaults_when_missing(self, monkeypatch, tmp_path):
         monkeypatch.setenv("API_KEY", "test-key")
@@ -276,6 +279,7 @@ class TestWhisperConfig:
         whisper_cfg = get_whisper_config()
         assert whisper_cfg.model == "base"
         assert whisper_cfg.fallback_enabled is True
+        assert whisper_cfg.unload_timeout == 300
 
 
 class TestRagConfig:
