@@ -40,9 +40,13 @@ export function TranscriptViewer({ segments, hasTimestamps }: TranscriptViewerPr
   const matchRefs = useRef<Map<number, HTMLElement>>(new Map())
 
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedQuery(query), 300)
+    const timer = setTimeout(() => setDebouncedQuery(query.slice(0, 200)), 300)
     return () => clearTimeout(timer)
   }, [query])
+
+  useEffect(() => {
+    matchRefs.current.clear()
+  }, [segments])
 
   const matches = useMemo((): SearchMatch[] => {
     if (!debouncedQuery.trim()) return []
