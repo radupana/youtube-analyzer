@@ -1,13 +1,14 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { Copy, Check, Download, Sparkles, RefreshCw } from "lucide-react"
+import { Copy, Check, Download, Sparkles, RefreshCw, FileText, X } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { SessionSidebar } from "@/components/session-sidebar"
 import { AnalysisCard } from "@/components/analysis-card"
+import { TranscriptViewer } from "@/components/transcript-viewer"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,6 +18,7 @@ import {
 import {
   Video,
   VideoAnalysis,
+  TranscriptResponse,
   ExportFormat,
   fetchSession,
   fetchSessionVideos,
@@ -32,6 +34,7 @@ import {
   copyTranscript,
   analyzeVideo,
   getAnalysis,
+  fetchTranscript,
 } from "@/lib/api"
 
 interface ChatMessage {
@@ -72,6 +75,8 @@ export default function Home() {
   const [copiedVideoId, setCopiedVideoId] = useState<string | null>(null)
   const [videoAnalyses, setVideoAnalyses] = useState<Record<string, VideoAnalysis>>({})
   const [analyzingVideo, setAnalyzingVideo] = useState<string | null>(null)
+  const [activeTranscript, setActiveTranscript] = useState<TranscriptResponse | null>(null)
+  const [loadingTranscript, setLoadingTranscript] = useState<string | null>(null)
 
   const loadSession = useCallback(async (sid: string) => {
     try {
@@ -289,6 +294,22 @@ export default function Home() {
     setAnalyzingVideo(null)
   }
 
+  const handleViewTranscript = async (videoId: string) => {
+    if (activeTranscript?.video_id === videoId) {
+      setActiveTranscript(null)
+      return
+    }
+
+    setLoadingTranscript(videoId)
+    try {
+      const transcript = await fetchTranscript(videoId)
+      setActiveTranscript(transcript)
+    } catch (error) {
+      console.error("Failed to load transcript:", error)
+    }
+    setLoadingTranscript(null)
+  }
+
   useEffect(() => {
     const loadAnalyses = async () => {
       for (const video of videos) {
@@ -461,6 +482,20 @@ export default function Home() {
                                   <Button
                                     size="sm"
                                     variant="ghost"
+                                    onClick={() => handleViewTranscript(video.id)}
+                                    disabled={loadingTranscript === video.id}
+                                    className="h-6 w-6 p-0"
+                                    title={activeTranscript?.video_id === video.id ? "Hide transcript" : "View transcript"}
+                                  >
+                                    {loadingTranscript === video.id ? (
+                                      <RefreshCw className="h-3 w-3 animate-spin" />
+                                    ) : (
+                                      <FileText className={`h-3 w-3 ${activeTranscript?.video_id === video.id ? "text-blue-500" : ""}`} />
+                                    )}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
                                     onClick={() => handleCopy(video.id)}
                                     className="h-6 w-6 p-0"
                                     title="Copy transcript"
@@ -513,6 +548,22 @@ export default function Home() {
             </div>
 
             <div className="col-span-2 flex flex-col min-h-0 gap-4">
+              {activeTranscript && (
+                <Card className="h-[40%] flex flex-col min-h-0">
+                  <CardHeader className="pb-2 flex flex-row items-center justify-between">
+                    <div className="min-w-0 flex-1">
+                      <CardTitle className="text-lg">Transcript</CardTitle>
+                      <CardDescription className="truncate">{activeTranscript.video_title}</CardDescription>
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={() => setActiveTranscript(null)} className="h-8 w-8 p-0 shrink-0">
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </CardHeader>
+                  <CardContent className="flex-1 p-0 min-h-0">
+                    <TranscriptViewer segments={activeTranscript.segments} hasTimestamps={activeTranscript.has_timestamps} />
+                  </CardContent>
+                </Card>
+              )}
               {videos.filter(v => videoAnalyses[v.id]).length > 0 && (
                 <div className="space-y-0 max-h-[40%] overflow-y-auto">
                   {videos.filter(v => videoAnalyses[v.id]).map(video => (

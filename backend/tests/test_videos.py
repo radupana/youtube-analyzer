@@ -1,8 +1,11 @@
+from datetime import UTC, datetime
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.db.database import get_session
+from app.db.models import Chunk, Video
 from app.main import app
 
 
@@ -127,3 +130,116 @@ def test_delete_video_not_found(test_client):
     response = client.delete("/api/v1/videos/nonexistent-video-id")
     assert response.status_code == 404
     assert response.json()["detail"] == "Video not found"
+
+
+def test_get_transcript_success(test_client):
+    client, engine = test_client
+    with Session(engine) as db:
+        video = Video(
+            id="test123",
+            title="Test Video",
+            channel_id="ch123",
+            channel_title="Test Channel",
+            duration="PT10M",
+            published_at=datetime.now(UTC),
+            transcript="Hello world. This is a test transcript.",
+            transcript_source="youtube",
+        )
+        db.add(video)
+        db.commit()
+
+        chunk1 = Chunk(
+            id="test123_0",
+            video_id="test123",
+            text="Hello world.",
+            start_time=0.0,
+            end_time=5.0,
+            token_count=3,
+            embedding=b"fake",
+        )
+        chunk2 = Chunk(
+            id="test123_1",
+            video_id="test123",
+            text="This is a test transcript.",
+            start_time=5.0,
+            end_time=10.0,
+            token_count=6,
+            embedding=b"fake",
+        )
+        db.add(chunk1)
+        db.add(chunk2)
+        db.commit()
+
+    response = client.get("/api/v1/videos/test123/transcript")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["video_id"] == "test123"
+    assert data["video_title"] == "Test Video"
+    assert data["full_text"] == "Hello world. This is a test transcript."
+    assert len(data["segments"]) == 2
+    assert data["segments"][0]["text"] == "Hello world."
+    assert data["segments"][0]["start_time"] == 0.0
+    assert data["segments"][1]["start_time"] == 5.0
+    assert data["has_timestamps"] is True
+
+
+def test_get_transcript_not_found(test_client):
+    client, _ = test_client
+    response = client.get("/api/v1/videos/nonexistent/transcript")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Video not found"
+
+
+def test_get_transcript_no_transcript(test_client):
+    client, engine = test_client
+    with Session(engine) as db:
+        video = Video(
+            id="notranscript",
+            title="No Transcript Video",
+            channel_id="ch123",
+            channel_title="Test Channel",
+            duration="PT10M",
+            published_at=datetime.now(UTC),
+            transcript=None,
+            transcript_source=None,
+        )
+        db.add(video)
+        db.commit()
+
+    response = client.get("/api/v1/videos/notranscript/transcript")
+    assert response.status_code == 400
+    assert "No transcript" in response.json()["detail"]
+
+
+def test_get_transcript_no_timestamps(test_client):
+    client, engine = test_client
+    with Session(engine) as db:
+        video = Video(
+            id="whisper123",
+            title="Whisper Video",
+            channel_id="ch123",
+            channel_title="Test Channel",
+            duration="PT10M",
+            published_at=datetime.now(UTC),
+            transcript="Whisper transcribed text.",
+            transcript_source="whisper",
+        )
+        db.add(video)
+        db.commit()
+
+        chunk = Chunk(
+            id="whisper123_0",
+            video_id="whisper123",
+            text="Whisper transcribed text.",
+            start_time=0.0,
+            end_time=0.0,
+            token_count=4,
+            embedding=b"fake",
+        )
+        db.add(chunk)
+        db.commit()
+
+    response = client.get("/api/v1/videos/whisper123/transcript")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["has_timestamps"] is False

@@ -138,3 +138,17 @@ class AnalysisResponse(BaseModel):
     model_used: str
     created_at: datetime
     cached: bool
+
+
+class TranscriptSegmentSchema(BaseModel):
+    text: str
+    start_time: float
+    end_time: float
+
+
+class TranscriptResponse(BaseModel):
+    video_id: str
+    video_title: str
+    full_text: str
+    segments: list[TranscriptSegmentSchema]
+    has_timestamps: bool

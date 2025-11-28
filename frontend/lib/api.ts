@@ -221,3 +221,28 @@ export async function getAnalysis(videoId: string): Promise<VideoAnalysis | null
 
   return response.json()
 }
+
+export interface TranscriptSegment {
+  text: string
+  start_time: number
+  end_time: number
+}
+
+export interface TranscriptResponse {
+  video_id: string
+  video_title: string
+  full_text: string
+  segments: TranscriptSegment[]
+  has_timestamps: boolean
+}
+
+export async function fetchTranscript(videoId: string): Promise<TranscriptResponse> {
+  const response = await fetch(`${API_BASE}/videos/${videoId}/transcript`)
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || "Failed to fetch transcript")
+  }
+
+  return response.json()
+}
