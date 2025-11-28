@@ -23,6 +23,15 @@ def get_model() -> SentenceTransformer:
     return _model
 
 
+def clear_model() -> None:
+    """Clear the embedding model from memory."""
+    global _model
+    if _model is not None:
+        logger.info("Clearing embedding model from memory")
+        del _model
+        _model = None
+
+
 def generate_embeddings(texts: list[str]) -> np.ndarray:
     """
     Generate embeddings for a list of texts.

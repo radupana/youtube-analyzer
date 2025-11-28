@@ -5,6 +5,7 @@ import numpy as np
 from app.services.chunking import TranscriptChunk
 from app.services.embeddings import (
     EMBEDDING_DIMENSION,
+    clear_model,
     generate_chunk_embeddings,
     generate_embeddings,
     generate_query_embedding,
@@ -102,3 +103,20 @@ class TestGenerateQueryEmbedding:
         sim_to_weather = np.dot(query_embedding, text_embeddings[1])
 
         assert sim_to_ml > sim_to_weather
+
+
+class TestClearModel:
+    def test_clear_model_clears_global(self):
+        generate_embeddings(["test"])
+        import app.services.embeddings as emb
+
+        assert emb._model is not None
+        clear_model()
+        assert emb._model is None
+
+    def test_clear_model_when_not_loaded(self):
+        import app.services.embeddings as emb
+
+        emb._model = None
+        clear_model()
+        assert emb._model is None

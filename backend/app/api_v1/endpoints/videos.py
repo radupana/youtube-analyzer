@@ -21,7 +21,8 @@ from app.api_v1.schemas import (
 from app.db.database import get_engine, get_session
 from app.db.models import Chunk, SessionVideo, Video, utc_now
 from app.db.models import Session as DBSession
-from app.services.rag import has_rag_data, process_transcript_for_rag
+from app.services.embeddings import clear_model
+from app.services.rag import process_transcript_for_rag
 from app.services.youtube import YouTubeService
 
 logger = logging.getLogger(__name__)
@@ -122,7 +123,7 @@ async def process_single_video(task_id: str, video_id: str, session_id: str):
                 cached_title[:50] + "..." if len(cached_title) > 50 else cached_title
             )
 
-            if cached_transcript and not has_rag_data(video_id):
+            if cached_transcript:
                 task_progress[task_id]["current_step"] = "rag"
                 task_progress[task_id]["message"] = "Processing for search..."
                 task_progress[task_id]["progress"] = 75.0
@@ -361,6 +362,7 @@ async def delete_video(video_id: str, db: Session = Depends(get_session)):
 async def clear_cache(db: Session = Depends(get_session)):
     """Clear all videos and chunks from database."""
     task_progress.clear()
+    clear_model()
 
     chunks = db.exec(select(Chunk)).all()
     for chunk in chunks:
