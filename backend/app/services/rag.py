@@ -5,6 +5,7 @@ import logging
 import numpy as np
 from sqlmodel import Session, select
 
+from app.core.llm_config import get_rag_config
 from app.db.database import get_engine
 from app.db.models import Chunk
 from app.services.chunking import (
@@ -23,8 +24,8 @@ def process_transcript_for_rag(
     video_id: str,
     transcript: str,
     segments: list[TranscriptSegment] | None = None,
-    chunk_size: int = 500,
-    overlap: int = 50,
+    chunk_size: int | None = None,
+    overlap: int | None = None,
 ) -> bool:
     """
     Process a transcript: chunk it, generate embeddings, and store in database.
@@ -33,12 +34,16 @@ def process_transcript_for_rag(
         video_id: YouTube video ID
         transcript: Full transcript text
         segments: Optional list of transcript segments with timestamps
-        chunk_size: Target tokens per chunk
-        overlap: Token overlap between chunks
+        chunk_size: Target tokens per chunk (defaults to config)
+        overlap: Token overlap between chunks (defaults to config)
 
     Returns:
         True if processing succeeded
     """
+    config = get_rag_config()
+    chunk_size = chunk_size or config.chunk_size
+    overlap = overlap or config.chunk_overlap
+
     if has_rag_data(video_id):
         logger.info(f"Chunks already exist for {video_id}")
         return True
@@ -80,8 +85,8 @@ def process_transcript_for_rag(
 def retrieve_context_for_query(
     query: str,
     video_ids: list[str],
-    top_k: int = 10,
-    max_tokens: int = 4000,
+    top_k: int | None = None,
+    max_tokens: int | None = None,
 ) -> str:
     """
     Retrieve relevant context for a query from multiple videos.
@@ -89,14 +94,18 @@ def retrieve_context_for_query(
     Args:
         query: User's question
         video_ids: List of video IDs to search
-        top_k: Number of chunks to retrieve per video
-        max_tokens: Maximum tokens in returned context
+        top_k: Number of chunks to retrieve (defaults to config)
+        max_tokens: Maximum tokens in returned context (defaults to config)
 
     Returns:
         Formatted context string with relevant chunks
     """
     if not video_ids:
         return ""
+
+    config = get_rag_config()
+    top_k = top_k or config.top_k
+    max_tokens = max_tokens or config.max_context_tokens
 
     all_chunks: list[TranscriptChunk] = []
     all_embeddings: list[np.ndarray] = []

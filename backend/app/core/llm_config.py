@@ -19,14 +19,23 @@ class WhisperConfig:
     fallback_enabled: bool = True
 
 
+@dataclass
+class RagConfig:
+    chunk_size: int = 500
+    chunk_overlap: int = 50
+    top_k: int = 10
+    max_context_tokens: int = 4000
+
+
 _providers: dict[str, LLMProvider] = {}
 _current_provider_id: str | None = None
 _default_provider_id: str | None = None
 _whisper_config: WhisperConfig = WhisperConfig()
+_rag_config: RagConfig = RagConfig()
 
 
 def load_config(config_path: str | Path = "config.yaml") -> None:
-    global _providers, _current_provider_id, _default_provider_id, _whisper_config
+    global _providers, _current_provider_id, _default_provider_id, _whisper_config, _rag_config
 
     path = Path(config_path)
     if not path.exists():
@@ -63,6 +72,14 @@ def load_config(config_path: str | Path = "config.yaml") -> None:
         fallback_enabled=whisper_cfg.get("fallback_enabled", True),
     )
 
+    rag_cfg = config.get("rag", {})
+    _rag_config = RagConfig(
+        chunk_size=rag_cfg.get("chunk_size", 500),
+        chunk_overlap=rag_cfg.get("chunk_overlap", 50),
+        top_k=rag_cfg.get("top_k", 10),
+        max_context_tokens=rag_cfg.get("max_context_tokens", 4000),
+    )
+
 
 def get_providers() -> list[LLMProvider]:
     return list(_providers.values())
@@ -88,3 +105,7 @@ def get_provider_by_id(provider_id: str) -> LLMProvider | None:
 
 def get_whisper_config() -> WhisperConfig:
     return _whisper_config
+
+
+def get_rag_config() -> RagConfig:
+    return _rag_config

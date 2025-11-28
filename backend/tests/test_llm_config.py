@@ -4,10 +4,12 @@ import yaml
 from app.core import llm_config
 from app.core.llm_config import (
     LLMProvider,
+    RagConfig,
     WhisperConfig,
     get_current_provider,
     get_provider_by_id,
     get_providers,
+    get_rag_config,
     get_whisper_config,
     load_config,
     set_current_provider,
@@ -21,11 +23,13 @@ def reset_llm_config():
     llm_config._current_provider_id = None
     llm_config._default_provider_id = None
     llm_config._whisper_config = WhisperConfig()
+    llm_config._rag_config = RagConfig()
     yield
     llm_config._providers = {}
     llm_config._current_provider_id = None
     llm_config._default_provider_id = None
     llm_config._whisper_config = WhisperConfig()
+    llm_config._rag_config = RagConfig()
 
 
 class TestLoadConfig:
@@ -272,3 +276,66 @@ class TestWhisperConfig:
         whisper_cfg = get_whisper_config()
         assert whisper_cfg.model == "base"
         assert whisper_cfg.fallback_enabled is True
+
+
+class TestRagConfig:
+    def test_default_rag_config(self):
+        config = get_rag_config()
+        assert config.chunk_size == 500
+        assert config.chunk_overlap == 50
+        assert config.top_k == 10
+        assert config.max_context_tokens == 4000
+
+    def test_rag_config_from_yaml(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("API_KEY", "test-key")
+
+        config = {
+            "llm_providers": [
+                {
+                    "id": "test",
+                    "name": "Test",
+                    "model": "gemini/gemini-2.0-flash",
+                    "api_key_env": "API_KEY",
+                }
+            ],
+            "rag": {
+                "chunk_size": 1000,
+                "chunk_overlap": 100,
+                "top_k": 20,
+                "max_context_tokens": 8000,
+            },
+        }
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(yaml.dump(config))
+
+        load_config(config_file)
+
+        rag_cfg = get_rag_config()
+        assert rag_cfg.chunk_size == 1000
+        assert rag_cfg.chunk_overlap == 100
+        assert rag_cfg.top_k == 20
+        assert rag_cfg.max_context_tokens == 8000
+
+    def test_rag_config_defaults_when_missing(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("API_KEY", "test-key")
+
+        config = {
+            "llm_providers": [
+                {
+                    "id": "test",
+                    "name": "Test",
+                    "model": "gemini/gemini-2.0-flash",
+                    "api_key_env": "API_KEY",
+                }
+            ],
+        }
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(yaml.dump(config))
+
+        load_config(config_file)
+
+        rag_cfg = get_rag_config()
+        assert rag_cfg.chunk_size == 500
+        assert rag_cfg.chunk_overlap == 50
+        assert rag_cfg.top_k == 10
+        assert rag_cfg.max_context_tokens == 4000
