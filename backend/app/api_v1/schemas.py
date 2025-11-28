@@ -123,3 +123,18 @@ class SessionDetailResponse(BaseModel):
     updated_at: datetime
     messages: list[MessageResponse]
     videos: list[SessionVideoResponse]
+
+
+class AnalysisRequest(BaseModel):
+    force_regenerate: bool = False
+
+
+class AnalysisResponse(BaseModel):
+    video_id: str
+    summary: str
+    key_takeaways: list[str]
+    main_topics: list[str]
+    notable_quotes: list[str]
+    model_used: str
+    created_at: datetime
+    cached: bool

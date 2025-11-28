@@ -82,3 +82,18 @@ class SessionVideo(SQLModel, table=True):
 
     session: Session = Relationship(back_populates="session_videos")
     video: Video = Relationship()
+
+
+class VideoAnalysis(SQLModel, table=True):
+    """Cached video analysis result."""
+
+    __tablename__ = "video_analysis"
+
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    video_id: str = Field(foreign_key="video.id", index=True, unique=True)
+    summary: str
+    key_takeaways: str
+    main_topics: str
+    notable_quotes: str
+    model_used: str
+    created_at: datetime = Field(default_factory=utc_now)

@@ -1,8 +1,10 @@
 from datetime import datetime
 
+import pytest
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
-from app.db.models import Chunk, Message, Session, SessionVideo, Video
+from app.db.models import Chunk, Message, Session, SessionVideo, Video, VideoAnalysis
 
 
 class TestSessionModel:
@@ -362,3 +364,72 @@ class TestMultipleRecords:
 
         result = db_session.exec(select(Session)).all()
         assert len(result) == 3
+
+
+class TestVideoAnalysisModel:
+    def test_create_video_analysis(self, db_session):
+        video = Video(
+            id="test123",
+            title="Test Video",
+            channel_id="ch123",
+            channel_title="Test Channel",
+            duration="PT10M",
+            published_at=datetime.now(),
+            transcript="Test transcript",
+        )
+        db_session.add(video)
+        db_session.commit()
+
+        analysis = VideoAnalysis(
+            video_id="test123",
+            summary="This is a test summary.",
+            key_takeaways='["Point 1", "Point 2"]',
+            main_topics='["Topic A"]',
+            notable_quotes='["Quote 1"]',
+            model_used="gemini/gemini-2.5-flash",
+        )
+        db_session.add(analysis)
+        db_session.commit()
+        db_session.refresh(analysis)
+
+        assert analysis.id is not None
+        assert analysis.video_id == "test123"
+        assert analysis.summary == "This is a test summary."
+        assert analysis.model_used == "gemini/gemini-2.5-flash"
+        assert analysis.created_at is not None
+
+    def test_video_analysis_unique_constraint(self, db_session):
+        video = Video(
+            id="test456",
+            title="Test Video",
+            channel_id="ch123",
+            channel_title="Test Channel",
+            duration="PT10M",
+            published_at=datetime.now(),
+        )
+        db_session.add(video)
+        db_session.commit()
+
+        analysis1 = VideoAnalysis(
+            video_id="test456",
+            summary="First",
+            key_takeaways="[]",
+            main_topics="[]",
+            notable_quotes="[]",
+            model_used="test",
+        )
+        db_session.add(analysis1)
+        db_session.commit()
+
+        analysis2 = VideoAnalysis(
+            video_id="test456",
+            summary="Second",
+            key_takeaways="[]",
+            main_topics="[]",
+            notable_quotes="[]",
+            model_used="test",
+        )
+        db_session.add(analysis2)
+
+        with pytest.raises(IntegrityError):
+            db_session.commit()

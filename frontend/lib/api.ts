@@ -177,3 +177,47 @@ export async function copyTranscript(videoId: string): Promise<string> {
 
   return response.text()
 }
+
+export interface VideoAnalysis {
+  video_id: string
+  summary: string
+  key_takeaways: string[]
+  main_topics: string[]
+  notable_quotes: string[]
+  model_used: string
+  created_at: string
+  cached: boolean
+}
+
+export async function analyzeVideo(
+  videoId: string,
+  forceRegenerate: boolean = false
+): Promise<VideoAnalysis> {
+  const response = await fetch(`${API_BASE}/videos/${videoId}/analyze`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ force_regenerate: forceRegenerate }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || "Failed to analyze video")
+  }
+
+  return response.json()
+}
+
+export async function getAnalysis(videoId: string): Promise<VideoAnalysis | null> {
+  const response = await fetch(`${API_BASE}/videos/${videoId}/analysis`)
+
+  if (response.status === 404) {
+    return null
+  }
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || "Failed to get analysis")
+  }
+
+  return response.json()
+}
