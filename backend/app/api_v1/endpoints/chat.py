@@ -3,7 +3,7 @@ from sqlmodel import Session, select
 
 from app.api_v1.schemas import ChatRequest, ChatResponse
 from app.db.database import get_session
-from app.db.models import Message, SessionVideo, utc_now
+from app.db.models import Message, SessionVideo, Video, utc_now
 from app.db.models import Session as DBSession
 from app.services.llm import chat_with_context
 
@@ -13,18 +13,23 @@ active_connections: list[WebSocket] = []
 
 
 def get_video_context_from_session(db: Session, session_id: str) -> list[dict]:
-    videos = db.exec(
+    session_videos = db.exec(
         select(SessionVideo).where(SessionVideo.session_id == session_id)
     ).all()
-    return [
-        {
-            "video_id": v.video_id,
-            "title": v.title,
-            "channel_title": v.channel_title,
-            "transcript": v.transcript,
-        }
-        for v in videos
-    ]
+
+    result = []
+    for sv in session_videos:
+        video = db.get(Video, sv.video_id)
+        if video:
+            result.append(
+                {
+                    "video_id": video.id,
+                    "title": video.title,
+                    "channel_title": video.channel_title,
+                    "transcript": video.transcript,
+                }
+            )
+    return result
 
 
 @router.post("/message", response_model=ChatResponse)

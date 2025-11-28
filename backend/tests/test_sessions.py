@@ -1,9 +1,11 @@
+from datetime import datetime
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.db.database import get_session
-from app.db.models import Message, SessionVideo
+from app.db.models import Message, SessionVideo, Video
 from app.db.models import Session as DBSession
 from app.main import app
 
@@ -93,19 +95,28 @@ class TestGetSession:
             session.add(s)
             session.commit()
 
+            video = Video(
+                id="abc123",
+                title="Test Video",
+                channel_id="ch1",
+                channel_title="Test Channel",
+                duration="PT5M",
+                published_at=datetime.now(),
+                transcript_source="youtube",
+            )
+            session.add(video)
+            session.commit()
+
             msg = Message(
                 session_id=s.id,
                 role="user",
                 content="Hello",
             )
-            video = SessionVideo(
+            session_video = SessionVideo(
                 session_id=s.id,
                 video_id="abc123",
-                title="Test Video",
-                channel_title="Test Channel",
-                transcript_source="youtube",
             )
-            session.add_all([msg, video])
+            session.add_all([msg, session_video])
             session.commit()
 
         response = client.get("/api/v1/sessions/test-session-id")
@@ -170,14 +181,20 @@ class TestDeleteSession:
             session.add(s)
             session.commit()
 
-            msg = Message(session_id=s.id, role="user", content="Will be deleted")
-            video = SessionVideo(
-                session_id=s.id,
-                video_id="vid1",
+            video = Video(
+                id="vid1",
                 title="Video",
+                channel_id="ch1",
                 channel_title="Channel",
+                duration="PT5M",
+                published_at=datetime.now(),
             )
-            session.add_all([msg, video])
+            session.add(video)
+            session.commit()
+
+            msg = Message(session_id=s.id, role="user", content="Will be deleted")
+            session_video = SessionVideo(session_id=s.id, video_id="vid1")
+            session.add_all([msg, session_video])
             session.commit()
 
         response = client.delete("/api/v1/sessions/cascade-test-id")

@@ -1,6 +1,8 @@
+from datetime import datetime
+
 from sqlmodel import select
 
-from app.db.models import Message, Session, SessionVideo
+from app.db.models import Chunk, Message, Session, SessionVideo, Video
 
 
 class TestSessionModel:
@@ -30,7 +32,7 @@ class TestSessionModel:
         db_session.refresh(session)
 
         assert session.messages == []
-        assert session.videos == []
+        assert session.session_videos == []
 
 
 class TestMessageModel:
@@ -68,17 +70,15 @@ class TestMessageModel:
         assert session.messages[0].content == "Hi there!"
 
 
-class TestSessionVideoModel:
-    def test_create_session_video(self, db_session):
-        session = Session()
-        db_session.add(session)
-        db_session.commit()
-
-        video = SessionVideo(
-            session_id=session.id,
-            video_id="abc123",
+class TestVideoModel:
+    def test_create_video(self, db_session):
+        video = Video(
+            id="abc123",
             title="Test Video",
+            channel_id="ch123",
             channel_title="Test Channel",
+            duration="PT10M30S",
+            published_at=datetime.now(),
             transcript="This is a transcript",
             transcript_source="youtube",
         )
@@ -86,24 +86,21 @@ class TestSessionVideoModel:
         db_session.commit()
         db_session.refresh(video)
 
-        assert video.id is not None
-        assert video.video_id == "abc123"
+        assert video.id == "abc123"
         assert video.title == "Test Video"
         assert video.channel_title == "Test Channel"
         assert video.transcript == "This is a transcript"
         assert video.transcript_source == "youtube"
-        assert video.added_at is not None
+        assert video.created_at is not None
 
-    def test_session_video_nullable_transcript(self, db_session):
-        session = Session()
-        db_session.add(session)
-        db_session.commit()
-
-        video = SessionVideo(
-            session_id=session.id,
-            video_id="xyz789",
+    def test_video_nullable_transcript(self, db_session):
+        video = Video(
+            id="xyz789",
             title="No Transcript Video",
+            channel_id="ch456",
             channel_title="Some Channel",
+            duration="PT5M",
+            published_at=datetime.now(),
         )
         db_session.add(video)
         db_session.commit()
@@ -112,23 +109,121 @@ class TestSessionVideoModel:
         assert video.transcript is None
         assert video.transcript_source is None
 
-    def test_video_belongs_to_session(self, db_session):
+
+class TestSessionVideoModel:
+    def test_create_session_video_link(self, db_session):
         session = Session()
         db_session.add(session)
         db_session.commit()
 
-        video = SessionVideo(
-            session_id=session.id,
-            video_id="vid1",
-            title="Video 1",
+        video = Video(
+            id="vid1",
+            title="Test Video",
+            channel_id="ch1",
             channel_title="Channel",
+            duration="PT5M",
+            published_at=datetime.now(),
         )
         db_session.add(video)
         db_session.commit()
+
+        session_video = SessionVideo(
+            session_id=session.id,
+            video_id=video.id,
+        )
+        db_session.add(session_video)
+        db_session.commit()
+        db_session.refresh(session_video)
+
+        assert session_video.id is not None
+        assert session_video.session_id == session.id
+        assert session_video.video_id == video.id
+        assert session_video.added_at is not None
+
+    def test_session_video_links_session_to_video(self, db_session):
+        session = Session()
+        db_session.add(session)
+        db_session.commit()
+
+        video = Video(
+            id="vid1",
+            title="Video 1",
+            channel_id="ch1",
+            channel_title="Channel",
+            duration="PT5M",
+            published_at=datetime.now(),
+        )
+        db_session.add(video)
+        db_session.commit()
+
+        session_video = SessionVideo(session_id=session.id, video_id=video.id)
+        db_session.add(session_video)
+        db_session.commit()
         db_session.refresh(session)
 
-        assert len(session.videos) == 1
-        assert session.videos[0].video_id == "vid1"
+        assert len(session.session_videos) == 1
+        assert session.session_videos[0].video_id == "vid1"
+
+
+class TestChunkModel:
+    def test_create_chunk(self, db_session):
+        video = Video(
+            id="vid1",
+            title="Test Video",
+            channel_id="ch1",
+            channel_title="Channel",
+            duration="PT5M",
+            published_at=datetime.now(),
+        )
+        db_session.add(video)
+        db_session.commit()
+
+        chunk = Chunk(
+            id="vid1_0",
+            video_id="vid1",
+            text="Test chunk content",
+            start_time=0.0,
+            end_time=30.0,
+            token_count=5,
+            embedding=b"\x00" * 384 * 4,
+        )
+        db_session.add(chunk)
+        db_session.commit()
+        db_session.refresh(chunk)
+
+        assert chunk.id == "vid1_0"
+        assert chunk.video_id == "vid1"
+        assert chunk.text == "Test chunk content"
+        assert chunk.start_time == 0.0
+        assert chunk.end_time == 30.0
+
+    def test_video_has_chunks_relationship(self, db_session):
+        video = Video(
+            id="vid1",
+            title="Test Video",
+            channel_id="ch1",
+            channel_title="Channel",
+            duration="PT5M",
+            published_at=datetime.now(),
+        )
+        db_session.add(video)
+        db_session.commit()
+
+        for i in range(3):
+            chunk = Chunk(
+                id=f"vid1_{i}",
+                video_id="vid1",
+                text=f"Chunk {i}",
+                start_time=float(i * 10),
+                end_time=float((i + 1) * 10),
+                token_count=5,
+                embedding=b"\x00" * 384 * 4,
+            )
+            db_session.add(chunk)
+        db_session.commit()
+        db_session.refresh(video)
+
+        assert len(video.chunks) == 3
 
 
 class TestCascadeDelete:
@@ -151,18 +246,24 @@ class TestCascadeDelete:
         result = db_session.exec(select(Message)).all()
         assert len(result) == 0
 
-    def test_delete_session_deletes_videos(self, db_session):
+    def test_delete_session_deletes_session_videos(self, db_session):
         session = Session()
         db_session.add(session)
         db_session.commit()
 
-        video = SessionVideo(
-            session_id=session.id,
-            video_id="vid1",
+        video = Video(
+            id="vid1",
             title="Video",
+            channel_id="ch1",
             channel_title="Channel",
+            duration="PT5M",
+            published_at=datetime.now(),
         )
         db_session.add(video)
+        db_session.commit()
+
+        session_video = SessionVideo(session_id=session.id, video_id=video.id)
+        db_session.add(session_video)
         db_session.commit()
 
         result = db_session.exec(select(SessionVideo)).all()
@@ -172,6 +273,42 @@ class TestCascadeDelete:
         db_session.commit()
 
         result = db_session.exec(select(SessionVideo)).all()
+        assert len(result) == 0
+
+        video_still_exists = db_session.get(Video, "vid1")
+        assert video_still_exists is not None
+
+    def test_delete_video_deletes_chunks(self, db_session):
+        video = Video(
+            id="vid1",
+            title="Video",
+            channel_id="ch1",
+            channel_title="Channel",
+            duration="PT5M",
+            published_at=datetime.now(),
+        )
+        db_session.add(video)
+        db_session.commit()
+
+        chunk = Chunk(
+            id="vid1_0",
+            video_id="vid1",
+            text="Test",
+            start_time=0.0,
+            end_time=10.0,
+            token_count=1,
+            embedding=b"\x00" * 384 * 4,
+        )
+        db_session.add(chunk)
+        db_session.commit()
+
+        result = db_session.exec(select(Chunk)).all()
+        assert len(result) == 1
+
+        db_session.delete(video)
+        db_session.commit()
+
+        result = db_session.exec(select(Chunk)).all()
         assert len(result) == 0
 
 
@@ -199,17 +336,24 @@ class TestMultipleRecords:
         db_session.commit()
 
         for i in range(3):
-            video = SessionVideo(
-                session_id=session.id,
-                video_id=f"vid{i}",
+            video = Video(
+                id=f"vid{i}",
                 title=f"Video {i}",
+                channel_id=f"ch{i}",
                 channel_title="Channel",
+                duration="PT5M",
+                published_at=datetime.now(),
             )
             db_session.add(video)
+            db_session.commit()
+
+            session_video = SessionVideo(session_id=session.id, video_id=video.id)
+            db_session.add(session_video)
+
         db_session.commit()
         db_session.refresh(session)
 
-        assert len(session.videos) == 3
+        assert len(session.session_videos) == 3
 
     def test_multiple_sessions(self, db_session):
         sessions = [Session(title=f"Session {i}") for i in range(3)]

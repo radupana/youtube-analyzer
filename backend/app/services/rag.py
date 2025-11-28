@@ -3,8 +3,10 @@
 import logging
 
 import numpy as np
+from sqlmodel import Session, select
 
-from app.services.cache import get_cache_service
+from app.db.database import get_engine
+from app.db.models import Chunk
 from app.services.chunking import (
     TranscriptChunk,
     TranscriptSegment,
@@ -25,7 +27,7 @@ def process_transcript_for_rag(
     overlap: int = 50,
 ) -> bool:
     """
-    Process a transcript: chunk it, generate embeddings, and cache.
+    Process a transcript: chunk it, generate embeddings, and store in database.
 
     Args:
         video_id: YouTube video ID
@@ -37,10 +39,8 @@ def process_transcript_for_rag(
     Returns:
         True if processing succeeded
     """
-    cache = get_cache_service()
-
-    if cache.has_chunks(video_id):
-        logger.info(f"Chunks already cached for {video_id}")
+    if has_rag_data(video_id):
+        logger.info(f"Chunks already exist for {video_id}")
         return True
 
     if not transcript.strip():
@@ -59,19 +59,20 @@ def process_transcript_for_rag(
     texts = [chunk.text for chunk in chunks]
     embeddings = generate_embeddings(texts)
 
-    chunks_data = [
-        {
-            "id": chunk.id,
-            "video_id": chunk.video_id,
-            "text": chunk.text,
-            "start_time": chunk.start_time,
-            "end_time": chunk.end_time,
-            "token_count": chunk.token_count,
-        }
-        for chunk in chunks
-    ]
+    with Session(get_engine()) as db:
+        for i, chunk in enumerate(chunks):
+            db_chunk = Chunk(
+                id=chunk.id,
+                video_id=video_id,
+                text=chunk.text,
+                start_time=chunk.start_time,
+                end_time=chunk.end_time,
+                token_count=chunk.token_count,
+                embedding=embeddings[i].tobytes(),
+            )
+            db.add(db_chunk)
+        db.commit()
 
-    cache.save_chunks(video_id, chunks_data, embeddings)
     logger.info(f"Processed {len(chunks)} chunks for {video_id}")
     return True
 
@@ -94,31 +95,32 @@ def retrieve_context_for_query(
     Returns:
         Formatted context string with relevant chunks
     """
-    cache = get_cache_service()
+    if not video_ids:
+        return ""
 
     all_chunks: list[TranscriptChunk] = []
     all_embeddings: list[np.ndarray] = []
 
-    for video_id in video_ids:
-        cached = cache.load_chunks(video_id)
-        if not cached:
-            logger.warning(f"No chunks found for {video_id}")
-            continue
+    with Session(get_engine()) as db:
+        for video_id in video_ids:
+            db_chunks = db.exec(select(Chunk).where(Chunk.video_id == video_id)).all()
 
-        chunks_data, embeddings = cached
+            if not db_chunks:
+                logger.warning(f"No chunks found for {video_id}")
+                continue
 
-        for chunk_dict in chunks_data:
-            chunk = TranscriptChunk(
-                id=chunk_dict["id"],
-                video_id=chunk_dict["video_id"],
-                text=chunk_dict["text"],
-                start_time=chunk_dict["start_time"],
-                end_time=chunk_dict["end_time"],
-                token_count=chunk_dict["token_count"],
-            )
-            all_chunks.append(chunk)
-
-        all_embeddings.append(embeddings)
+            for db_chunk in db_chunks:
+                chunk = TranscriptChunk(
+                    id=db_chunk.id,
+                    video_id=db_chunk.video_id,
+                    text=db_chunk.text,
+                    start_time=db_chunk.start_time,
+                    end_time=db_chunk.end_time,
+                    token_count=db_chunk.token_count,
+                )
+                all_chunks.append(chunk)
+                embedding = np.frombuffer(db_chunk.embedding, dtype=np.float32)
+                all_embeddings.append(embedding)
 
     if not all_chunks:
         return ""
@@ -134,5 +136,8 @@ def retrieve_context_for_query(
 
 def has_rag_data(video_id: str) -> bool:
     """Check if RAG data (chunks/embeddings) exists for a video."""
-    cache = get_cache_service()
-    return cache.has_chunks(video_id)
+    with Session(get_engine()) as db:
+        chunk = db.exec(
+            select(Chunk).where(Chunk.video_id == video_id).limit(1)
+        ).first()
+        return chunk is not None

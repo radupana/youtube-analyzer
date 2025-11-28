@@ -1,28 +1,29 @@
 """Tests for LLM service."""
 
-import shutil
-import tempfile
-
 import pytest
+from sqlmodel import SQLModel, create_engine
 
 from app.services.llm import _build_context_fallback, build_context_with_rag
 from app.services.rag import process_transcript_for_rag
 
 
 @pytest.fixture
-def temp_cache_dir(monkeypatch):
-    """Create a temporary cache directory for tests."""
-    temp_dir = tempfile.mkdtemp()
-    monkeypatch.setenv("CACHE_DIR", temp_dir)
+def test_db(monkeypatch):
+    """Create an in-memory SQLite database for testing."""
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+    )
+    SQLModel.metadata.create_all(engine)
 
-    import app.services.cache
+    def get_test_engine():
+        return engine
 
-    app.services.cache._cache_service = None
+    monkeypatch.setattr("app.services.rag.get_engine", get_test_engine)
 
-    yield temp_dir
+    yield engine
 
-    shutil.rmtree(temp_dir, ignore_errors=True)
-    app.services.cache._cache_service = None
+    engine.dispose()
 
 
 class TestBuildContextFallback:
@@ -65,11 +66,11 @@ class TestBuildContextFallback:
 
 
 class TestBuildContextWithRag:
-    def test_empty_transcripts(self, temp_cache_dir):
+    def test_empty_transcripts(self, test_db):
         result = build_context_with_rag("test query", [])
         assert result == "No videos have been loaded yet."
 
-    def test_falls_back_when_no_rag_data(self, temp_cache_dir):
+    def test_falls_back_when_no_rag_data(self, test_db):
         videos = [
             {
                 "video_id": "vid1",
@@ -82,7 +83,7 @@ class TestBuildContextWithRag:
         assert "You have access to the following video transcripts:" in result
         assert "Test Video" in result
 
-    def test_uses_rag_when_available(self, temp_cache_dir):
+    def test_uses_rag_when_available(self, test_db):
         video_id = "testvid123"
         transcript = "Machine learning is a subset of artificial intelligence."
 
@@ -102,7 +103,7 @@ class TestBuildContextWithRag:
         assert "Relevant excerpts" in result
         assert "ML Tutorial" in result
 
-    def test_mixed_videos_rag_and_no_rag(self, temp_cache_dir):
+    def test_mixed_videos_rag_and_no_rag(self, test_db):
         process_transcript_for_rag("vid1", "Content about Python programming.")
 
         videos = [

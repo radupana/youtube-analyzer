@@ -1,9 +1,7 @@
 """Tests for RAG service."""
 
-import shutil
-import tempfile
-
 import pytest
+from sqlmodel import SQLModel, create_engine
 
 from app.services.chunking import TranscriptSegment
 from app.services.rag import (
@@ -14,38 +12,41 @@ from app.services.rag import (
 
 
 @pytest.fixture
-def temp_cache_dir(monkeypatch):
-    """Create a temporary cache directory for tests."""
-    temp_dir = tempfile.mkdtemp()
-    monkeypatch.setenv("CACHE_DIR", temp_dir)
+def test_db(monkeypatch):
+    """Create an in-memory SQLite database for testing."""
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+    )
+    SQLModel.metadata.create_all(engine)
 
-    import app.services.cache
+    def get_test_engine():
+        return engine
 
-    app.services.cache._cache_service = None
+    monkeypatch.setattr("app.services.rag.get_engine", get_test_engine)
 
-    yield temp_dir
+    yield engine
 
-    shutil.rmtree(temp_dir, ignore_errors=True)
-    app.services.cache._cache_service = None
+    engine.dispose()
 
 
 class TestProcessTranscriptForRag:
-    def test_empty_transcript_returns_false(self, temp_cache_dir):
+    def test_empty_transcript_returns_false(self, test_db):
         result = process_transcript_for_rag("vid1", "")
         assert result is False
 
-    def test_whitespace_transcript_returns_false(self, temp_cache_dir):
+    def test_whitespace_transcript_returns_false(self, test_db):
         result = process_transcript_for_rag("vid1", "   \n\t  ")
         assert result is False
 
-    def test_simple_transcript_creates_chunks(self, temp_cache_dir):
+    def test_simple_transcript_creates_chunks(self, test_db):
         transcript = "This is a test transcript with some content."
         result = process_transcript_for_rag("vid1", transcript)
 
         assert result is True
         assert has_rag_data("vid1")
 
-    def test_transcript_with_segments(self, temp_cache_dir):
+    def test_transcript_with_segments(self, test_db):
         segments = [
             TranscriptSegment(text="First segment.", start=0.0, duration=5.0),
             TranscriptSegment(text="Second segment.", start=5.0, duration=5.0),
@@ -57,7 +58,7 @@ class TestProcessTranscriptForRag:
         assert result is True
         assert has_rag_data("vid2")
 
-    def test_already_cached_returns_true(self, temp_cache_dir):
+    def test_already_exists_returns_true(self, test_db):
         transcript = "Some content here."
         process_transcript_for_rag("vid3", transcript)
 
@@ -65,7 +66,7 @@ class TestProcessTranscriptForRag:
 
         assert result is True
 
-    def test_long_transcript_creates_multiple_chunks(self, temp_cache_dir):
+    def test_long_transcript_creates_multiple_chunks(self, test_db):
         transcript = "word " * 1000
         result = process_transcript_for_rag(
             "vid4", transcript, chunk_size=100, overlap=10
@@ -76,15 +77,15 @@ class TestProcessTranscriptForRag:
 
 
 class TestRetrieveContextForQuery:
-    def test_no_videos_returns_empty(self, temp_cache_dir):
+    def test_no_videos_returns_empty(self, test_db):
         result = retrieve_context_for_query("what is this?", [])
         assert result == ""
 
-    def test_missing_video_returns_empty(self, temp_cache_dir):
+    def test_missing_video_returns_empty(self, test_db):
         result = retrieve_context_for_query("query", ["nonexistent"])
         assert result == ""
 
-    def test_retrieves_relevant_content(self, temp_cache_dir):
+    def test_retrieves_relevant_content(self, test_db):
         transcript = (
             "Machine learning is a subset of artificial intelligence. "
             "Weather forecasting uses various models. "
@@ -99,7 +100,7 @@ class TestRetrieveContextForQuery:
         assert len(result) > 0
         assert "machine learning" in result.lower() or "neural" in result.lower()
 
-    def test_retrieves_from_multiple_videos(self, temp_cache_dir):
+    def test_retrieves_from_multiple_videos(self, test_db):
         process_transcript_for_rag(
             "vid1", "Python programming language basics.", chunk_size=50
         )
@@ -109,7 +110,7 @@ class TestRetrieveContextForQuery:
 
         assert len(result) > 0
 
-    def test_respects_max_tokens(self, temp_cache_dir):
+    def test_respects_max_tokens(self, test_db):
         transcript = "word " * 500
         process_transcript_for_rag("vid1", transcript, chunk_size=100)
 
@@ -124,9 +125,9 @@ class TestRetrieveContextForQuery:
 
 
 class TestHasRagData:
-    def test_returns_false_for_missing(self, temp_cache_dir):
+    def test_returns_false_for_missing(self, test_db):
         assert has_rag_data("nonexistent") is False
 
-    def test_returns_true_after_processing(self, temp_cache_dir):
+    def test_returns_true_after_processing(self, test_db):
         process_transcript_for_rag("vid1", "Some transcript content.")
         assert has_rag_data("vid1") is True
