@@ -15,6 +15,11 @@ pytube
 # LLM
 litellm>=1.50.0
 
+# RAG (Retrieval-Augmented Generation)
+sentence-transformers>=3.0.0
+faiss-cpu>=1.8.0
+tiktoken>=0.7.0
+
 # Config
 pyyaml>=6.0
 
