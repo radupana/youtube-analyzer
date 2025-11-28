@@ -145,3 +145,35 @@ export async function setProvider(id: string): Promise<void> {
   })
   if (!response.ok) throw new Error("Failed to set provider")
 }
+
+export type ExportFormat = "txt" | "md" | "srt" | "json"
+
+export async function exportTranscript(
+  videoId: string,
+  format: ExportFormat
+): Promise<{ blob: Blob; filename: string }> {
+  const response = await fetch(`${API_BASE}/videos/${videoId}/export?format=${format}`)
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || "Failed to export transcript")
+  }
+
+  const disposition = response.headers.get("Content-Disposition")
+  const filenameMatch = disposition?.match(/filename="(.+)"/)
+  const filename = filenameMatch?.[1] || `transcript.${format}`
+
+  const blob = await response.blob()
+  return { blob, filename }
+}
+
+export async function copyTranscript(videoId: string): Promise<string> {
+  const response = await fetch(`${API_BASE}/videos/${videoId}/export?format=txt`)
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || "Failed to fetch transcript")
+  }
+
+  return response.text()
+}

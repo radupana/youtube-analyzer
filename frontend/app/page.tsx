@@ -1,13 +1,21 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
+import { Copy, Check, Download } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { SessionSidebar } from "@/components/session-sidebar"
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
   Video,
+  ExportFormat,
   fetchSession,
   fetchSessionVideos,
   addVideo,
@@ -18,6 +26,8 @@ import {
   fetchCurrentProvider,
   setProvider,
   createSession,
+  exportTranscript,
+  copyTranscript,
 } from "@/lib/api"
 
 interface ChatMessage {
@@ -55,6 +65,7 @@ export default function Home() {
   const [providers, setProviders] = useState<LLMProvider[]>([])
   const [currentProvider, setCurrentProvider] = useState<LLMProvider | null>(null)
   const [initializing, setInitializing] = useState(true)
+  const [copiedVideoId, setCopiedVideoId] = useState<string | null>(null)
 
   const loadSession = useCallback(async (sid: string) => {
     try {
@@ -234,6 +245,33 @@ export default function Home() {
     }
   }
 
+  const handleExport = async (videoId: string, format: ExportFormat) => {
+    try {
+      const { blob, filename } = await exportTranscript(videoId, format)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error("Export failed:", error)
+    }
+  }
+
+  const handleCopy = async (videoId: string) => {
+    try {
+      const text = await copyTranscript(videoId)
+      await navigator.clipboard.writeText(text)
+      setCopiedVideoId(videoId)
+      setTimeout(() => setCopiedVideoId(null), 2000)
+    } catch (error) {
+      console.error("Copy failed:", error)
+    }
+  }
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case "ready": return "text-green-600"
@@ -366,14 +404,54 @@ export default function Home() {
                                 {video.transcript_source === "whisper" && <span className="text-blue-600"> · Whisper</span>}
                               </div>
                             </div>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => handleRemoveVideo(video.id)}
-                              className="shrink-0 h-6 px-2 text-red-600 hover:text-red-700"
-                            >
-                              ×
-                            </Button>
+                            <div className="flex items-center gap-1">
+                              {video.status === "ready" && (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => handleCopy(video.id)}
+                                    className="h-6 w-6 p-0"
+                                    title="Copy transcript"
+                                  >
+                                    {copiedVideoId === video.id ? (
+                                      <Check className="h-3 w-3 text-green-600" />
+                                    ) : (
+                                      <Copy className="h-3 w-3" />
+                                    )}
+                                  </Button>
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button size="sm" variant="ghost" className="h-6 w-6 p-0" title="Download">
+                                        <Download className="h-3 w-3" />
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                      <DropdownMenuItem onClick={() => handleExport(video.id, "txt")}>
+                                        Plain Text (.txt)
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem onClick={() => handleExport(video.id, "md")}>
+                                        Markdown (.md)
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem onClick={() => handleExport(video.id, "srt")}>
+                                        Subtitles (.srt)
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem onClick={() => handleExport(video.id, "json")}>
+                                        JSON (.json)
+                                      </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                </>
+                              )}
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleRemoveVideo(video.id)}
+                                className="shrink-0 h-6 px-2 text-red-600 hover:text-red-700"
+                              >
+                                ×
+                              </Button>
+                            </div>
                           </div>
                         </li>
                       ))}
