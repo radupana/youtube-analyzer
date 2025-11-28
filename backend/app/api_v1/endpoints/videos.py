@@ -13,6 +13,8 @@ from sqlmodel import Session, select
 from app.api_v1.schemas import (
     TaskResponse,
     TaskStatus,
+    TranscriptResponse,
+    TranscriptSegmentSchema,
     VideoCreate,
     VideoList,
     VideoStatus,
@@ -410,6 +412,43 @@ async def export_transcript(
     return JSONResponse(
         data,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/{video_id}/transcript", response_model=TranscriptResponse)
+async def get_transcript(video_id: str, db: Session = Depends(get_session)):
+    """Get video transcript with timestamps for display/search."""
+    video = db.get(Video, video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    if not video.transcript:
+        raise HTTPException(
+            status_code=400,
+            detail="No transcript available for this video",
+        )
+
+    chunks = db.exec(
+        select(Chunk).where(Chunk.video_id == video_id).order_by(Chunk.start_time)  # type: ignore[arg-type]
+    ).all()
+
+    segments = [
+        TranscriptSegmentSchema(
+            text=chunk.text,
+            start_time=chunk.start_time,
+            end_time=chunk.end_time,
+        )
+        for chunk in chunks
+    ]
+
+    has_timestamps = any(s.start_time > 0 or s.end_time > 0 for s in segments)
+
+    return TranscriptResponse(
+        video_id=video_id,
+        video_title=video.title,
+        full_text=video.transcript,
+        segments=segments,
+        has_timestamps=has_timestamps,
     )
 
 
