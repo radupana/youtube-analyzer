@@ -35,7 +35,8 @@ _rag_config: RagConfig = RagConfig()
 
 
 def load_config(config_path: str | Path = "config.yaml") -> None:
-    global _providers, _current_provider_id, _default_provider_id, _whisper_config, _rag_config
+    global _providers, _current_provider_id, _default_provider_id
+    global _whisper_config, _rag_config
 
     path = Path(config_path)
     if not path.exists():
