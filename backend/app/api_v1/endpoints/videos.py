@@ -357,7 +357,7 @@ async def export_transcript(
             detail="No transcript available for this video",
         )
 
-    safe_title = "".join(c if c.isalnum() or c in " -_" else "_" for c in video.title)[
+    safe_title = "".join(c if c.isalnum() or c in "-_" else "_" for c in video.title)[
         :50
     ]
     filename = f"{safe_title}_{video_id}.{format.value}"
@@ -396,9 +396,11 @@ async def export_transcript(
             media_type="text/srt; charset=utf-8",
         )
 
-    chunks = db.exec(
-        select(Chunk).where(Chunk.video_id == video_id).order_by(Chunk.start_time)  # type: ignore[arg-type]
-    ).all()
+    # JSON format - reuse chunks variable from SRT check if available, otherwise query
+    if format == ExportFormat.JSON:
+        chunks = db.exec(
+            select(Chunk).where(Chunk.video_id == video_id).order_by(Chunk.start_time)  # type: ignore[arg-type]
+        ).all()
 
     data = export_json(video, list(chunks) if chunks else None)
     return JSONResponse(

@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine
 
+from app.db.database import get_session
 from app.db.models import Chunk, Video
 from app.main import app
 from app.services.export import (
@@ -132,8 +133,6 @@ class TestExportEndpoint:
         assert response.status_code == 404
 
     def test_export_txt_format(self):
-        from app.db.database import get_session
-
         engine = create_engine(
             "sqlite:///file:test_txt?mode=memory&cache=shared&uri=true",
             connect_args={"check_same_thread": False},
@@ -169,8 +168,6 @@ class TestExportEndpoint:
             app.dependency_overrides.clear()
 
     def test_export_markdown_format(self):
-        from app.db.database import get_session
-
         engine = create_engine(
             "sqlite:///file:test_md?mode=memory&cache=shared&uri=true",
             connect_args={"check_same_thread": False},
@@ -205,8 +202,6 @@ class TestExportEndpoint:
             app.dependency_overrides.clear()
 
     def test_export_json_format(self):
-        from app.db.database import get_session
-
         engine = create_engine(
             "sqlite:///file:test_json?mode=memory&cache=shared&uri=true",
             connect_args={"check_same_thread": False},
@@ -243,8 +238,6 @@ class TestExportEndpoint:
             app.dependency_overrides.clear()
 
     def test_export_srt_no_chunks(self):
-        from app.db.database import get_session
-
         engine = create_engine(
             "sqlite:///file:test_srt_no?mode=memory&cache=shared&uri=true",
             connect_args={"check_same_thread": False},
@@ -278,8 +271,6 @@ class TestExportEndpoint:
             app.dependency_overrides.clear()
 
     def test_export_srt_with_chunks(self):
-        from app.db.database import get_session
-
         engine = create_engine(
             "sqlite:///file:test_srt_chunks?mode=memory&cache=shared&uri=true",
             connect_args={"check_same_thread": False},
@@ -336,8 +327,6 @@ class TestExportEndpoint:
             app.dependency_overrides.clear()
 
     def test_export_no_transcript(self):
-        from app.db.database import get_session
-
         engine = create_engine(
             "sqlite:///file:test_no_transcript?mode=memory&cache=shared&uri=true",
             connect_args={"check_same_thread": False},
