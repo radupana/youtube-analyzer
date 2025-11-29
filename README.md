@@ -9,8 +9,6 @@
 
 Analyze YouTube videos using AI. Extract transcripts, ask questions, and get insights through a web interface.
 
-**Why this tool?** Unlike pasting URLs into ChatGPT, this caches transcripts locally, handles videos without captions (via Whisper), lets you build context across multiple videos, and runs entirely on your machine.
-
 ![Demo](demo.gif)
 
 **Features:**
