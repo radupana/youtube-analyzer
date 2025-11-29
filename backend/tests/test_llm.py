@@ -96,6 +96,7 @@ class TestBuildContextWithRag:
         assert "You have access to the following video transcripts:" in result
         assert "Test Video" in result
 
+    @pytest.mark.requires_embeddings
     def test_uses_rag_when_available(self, test_db):
         video_id = "testvid123"
         transcript = "Machine learning is a subset of artificial intelligence."
@@ -116,6 +117,7 @@ class TestBuildContextWithRag:
         assert "Relevant excerpts" in result
         assert "ML Tutorial" in result
 
+    @pytest.mark.requires_embeddings
     def test_mixed_videos_rag_and_no_rag(self, test_db):
         process_transcript_for_rag("vid1", "Content about Python programming.")
 

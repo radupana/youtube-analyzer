@@ -1,0 +1,21 @@
+# Lint-only dependencies - minimal set for ruff/mypy
+# These are the only imports that get type-checked
+
+# Web framework (for type stubs)
+fastapi>=0.115.0
+pydantic>=2.10.0
+pydantic-settings>=2.6.0
+
+# Database
+sqlmodel>=0.0.22
+
+# Config
+pyyaml>=6.0
+
+# System monitoring
+psutil>=5.9.0
+
+# Lint tools
+ruff>=0.8.0
+mypy>=1.13.0
+types-PyYAML

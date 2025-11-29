@@ -11,6 +11,7 @@ import { SessionSidebar } from "@/components/session-sidebar"
 import { TranscriptViewer } from "@/components/transcript-viewer"
 import { PatternSelector } from "@/components/pattern-selector"
 import { PatternResult } from "@/components/pattern-result"
+import { LanguagePreferencesDialog } from "@/components/language-preferences"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -51,6 +52,7 @@ import {
   copyTranscript,
   fetchTranscript,
 } from "@/lib/api"
+import { useLanguagePreferences } from "@/lib/useLanguagePreferences"
 
 interface ChatMessage {
   role: "user" | "assistant"
@@ -82,6 +84,7 @@ export default function Home() {
   const [selectedVideoForPattern, setSelectedVideoForPattern] = useState<string | null>(null)
   const [videoToDelete, setVideoToDelete] = useState<Video | null>(null)
   const streamingRef = useRef(false)
+  const { preferences: langPrefs, updatePreferences: updateLangPrefs } = useLanguagePreferences()
 
   const loadSession = useCallback(async (sid: string) => {
     try {
@@ -200,7 +203,12 @@ export default function Home() {
     }
 
     try {
-      await addVideo(inputUrl, sessionId)
+      await addVideo({
+        url: inputUrl,
+        sessionId,
+        preferredLanguages: langPrefs.preferredLanguages,
+        preferManual: langPrefs.preferManual,
+      })
       setInputUrl("")
       const updatedVideos = await fetchSessionVideos(sessionId)
       setVideos(updatedVideos)
@@ -237,31 +245,39 @@ export default function Home() {
     setChatInput("")
     setSendingMessage(true)
 
-    const assistantMessage: ChatMessage = { role: "assistant", content: "" }
-    setMessages(prev => [...prev, assistantMessage])
+    let assistantMessageAdded = false
 
     try {
       await sendChatMessageStream(
         messageText,
         sessionId,
         (chunk) => {
-          setMessages(prev =>
-            prev.map((msg, i) =>
-              i === prev.length - 1 && msg.role === "assistant"
-                ? { ...msg, content: msg.content + chunk }
-                : msg
+          if (!assistantMessageAdded) {
+            setMessages(prev => [...prev, { role: "assistant", content: chunk }])
+            assistantMessageAdded = true
+          } else {
+            setMessages(prev =>
+              prev.map((msg, i) =>
+                i === prev.length - 1 && msg.role === "assistant"
+                  ? { ...msg, content: msg.content + chunk }
+                  : msg
+              )
             )
-          )
+          }
         }
       )
     } catch (error) {
-      setMessages(prev =>
-        prev.map((msg, i) =>
-          i === prev.length - 1 && msg.role === "assistant"
-            ? { ...msg, content: `Error: ${error instanceof Error ? error.message : "Failed to get response"}` }
-            : msg
+      if (assistantMessageAdded) {
+        setMessages(prev =>
+          prev.map((msg, i) =>
+            i === prev.length - 1 && msg.role === "assistant"
+              ? { ...msg, content: `Error: ${error instanceof Error ? error.message : "Failed to get response"}` }
+              : msg
+          )
         )
-      )
+      } else {
+        setMessages(prev => [...prev, { role: "assistant", content: `Error: ${error instanceof Error ? error.message : "Failed to get response"}` }])
+      }
     }
     setSendingMessage(false)
     streamingRef.current = false
@@ -364,23 +380,29 @@ export default function Home() {
               <p className="text-sm text-muted-foreground">{sessionTitle}</p>
             )}
           </div>
-          {providers.length > 0 && (
-            <div className="flex items-center gap-2">
-              <Label htmlFor="provider" className="text-sm text-muted-foreground">Model:</Label>
-              <select
-                id="provider"
-                value={currentProvider?.id || ""}
-                onChange={e => handleProviderChange(e.target.value)}
-                className="border rounded px-2 py-1 text-sm bg-background"
-              >
-                {providers.map(provider => (
-                  <option key={provider.id} value={provider.id}>
-                    {provider.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+          <div className="flex items-center gap-4">
+            <LanguagePreferencesDialog
+              preferences={langPrefs}
+              onUpdate={updateLangPrefs}
+            />
+            {providers.length > 0 && (
+              <div className="flex items-center gap-2">
+                <Label htmlFor="provider" className="text-sm text-muted-foreground">Model:</Label>
+                <select
+                  id="provider"
+                  value={currentProvider?.id || ""}
+                  onChange={e => handleProviderChange(e.target.value)}
+                  className="border rounded px-2 py-1 text-sm bg-background"
+                >
+                  {providers.map(provider => (
+                    <option key={provider.id} value={provider.id}>
+                      {provider.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="flex-1 overflow-hidden p-4">
@@ -443,6 +465,13 @@ export default function Home() {
                                 )}
                                 {video.status === "ready" && video.transcript_source === "whisper" && (
                                   <span className="text-blue-600"> · Whisper</span>
+                                )}
+                                {video.status === "ready" && video.transcript_language_code && (
+                                  <span className="text-muted-foreground">
+                                    {" "}({video.transcript_language_code.toUpperCase()}
+                                    {video.transcript_is_generated === true && ", auto"}
+                                    {video.transcript_is_generated === false && ", manual"})
+                                  </span>
                                 )}
                               </div>
                               {(video.status === "pending" || video.status === "processing") && (
@@ -513,32 +542,32 @@ export default function Home() {
                                       </TooltipTrigger>
                                       <TooltipContent>Copy transcript</TooltipContent>
                                     </Tooltip>
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <DropdownMenu>
+                                    <DropdownMenu>
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
                                           <DropdownMenuTrigger asChild>
                                             <Button size="sm" variant="ghost" className="h-6 w-6 p-0">
                                               <Download className="h-3 w-3" />
                                             </Button>
                                           </DropdownMenuTrigger>
-                                          <DropdownMenuContent align="end">
-                                            <DropdownMenuItem onClick={() => handleExport(video.id, "txt")}>
-                                              Plain Text (.txt)
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem onClick={() => handleExport(video.id, "md")}>
-                                              Markdown (.md)
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem onClick={() => handleExport(video.id, "srt")}>
-                                              Subtitles (.srt)
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem onClick={() => handleExport(video.id, "json")}>
-                                              JSON (.json)
-                                            </DropdownMenuItem>
-                                          </DropdownMenuContent>
-                                        </DropdownMenu>
-                                      </TooltipTrigger>
-                                      <TooltipContent>Download</TooltipContent>
-                                    </Tooltip>
+                                        </TooltipTrigger>
+                                        <TooltipContent>Download</TooltipContent>
+                                      </Tooltip>
+                                      <DropdownMenuContent align="end">
+                                        <DropdownMenuItem onClick={() => handleExport(video.id, "txt")}>
+                                          Plain Text (.txt)
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => handleExport(video.id, "md")}>
+                                          Markdown (.md)
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => handleExport(video.id, "srt")}>
+                                          Subtitles (.srt)
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => handleExport(video.id, "json")}>
+                                          JSON (.json)
+                                        </DropdownMenuItem>
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
                                   </>
                                 )}
                                 <Tooltip>
@@ -635,7 +664,7 @@ export default function Home() {
                             </div>
                           </div>
                         ))}
-                        {sendingMessage && messages[messages.length - 1]?.content === "" && (
+                        {sendingMessage && messages[messages.length - 1]?.role === "user" && (
                           <div className="flex justify-start">
                             <div className="bg-muted rounded-lg px-3 py-2 text-sm text-muted-foreground animate-pulse">
                               Generating...
@@ -671,15 +700,23 @@ export default function Home() {
       <AlertDialog open={videoToDelete !== null} onOpenChange={(open) => !open && setVideoToDelete(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remove video?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will remove &quot;{videoToDelete?.title}&quot; from this session. The video data will remain cached in the database for future use.
+            <AlertDialogTitle>Permanently delete video?</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2">
+              <span className="block">
+                This will permanently delete &quot;{videoToDelete?.title}&quot; and all its data (transcript, analysis results).
+              </span>
+              <span className="block font-medium text-red-600">
+                Warning: This video will be removed from ALL sessions where it exists, not just this one.
+              </span>
+              <span className="block">
+                To get this video back, you&apos;ll need to add it again.
+              </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={confirmRemoveVideo} className="bg-red-600 hover:bg-red-700">
-              Remove
+              Delete permanently
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

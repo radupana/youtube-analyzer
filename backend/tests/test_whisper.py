@@ -222,7 +222,10 @@ class TestWhisperThreadSafety:
 class TestTranscribeAudio:
     def test_transcribe_audio_success(self):
         mock_model = MagicMock()
-        mock_model.transcribe.return_value = {"text": "  Hello world  "}
+        mock_model.transcribe.return_value = {
+            "text": "  Hello world  ",
+            "language": "en",
+        }
 
         with patch.object(whisper_module, "whisper") as mock_whisper:
             mock_whisper.load_model.return_value = mock_model
@@ -240,7 +243,7 @@ class TestTranscribeAudio:
                     "/path/to/audio.mp3", "test_video_id"
                 )
 
-                assert result == "Hello world"
+                assert result == ("Hello world", "en")
                 mock_model.transcribe.assert_called_once()
 
     def test_transcribe_audio_error(self):
@@ -274,7 +277,7 @@ class TestTranscribeAudio:
 
     def test_transcribe_audio_with_progress_callback(self):
         mock_model = MagicMock()
-        mock_model.transcribe.return_value = {"text": "Hello world"}
+        mock_model.transcribe.return_value = {"text": "Hello world", "language": "en"}
         progress_calls = []
 
         def track_progress(step, message):
@@ -299,7 +302,7 @@ class TestTranscribeAudio:
                     duration_msg=" (~30s audio)",
                 )
 
-                assert result == "Hello world"
+                assert result == ("Hello world", "en")
                 assert len(progress_calls) == 1
                 assert progress_calls[0][0] == "whisper_transcribing"
                 assert "~30s audio" in progress_calls[0][1]

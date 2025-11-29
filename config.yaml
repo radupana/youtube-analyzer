@@ -26,3 +26,7 @@ rag:
   chunk_overlap: 50
   top_k: 10
   max_context_tokens: 4000
+
+transcripts:
+  preferred_languages: ["en", "de", "fr", "es", "pt", "it", "nl", "pl", "ja", "ko", "zh"]
+  prefer_manual: true

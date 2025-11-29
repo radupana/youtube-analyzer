@@ -30,6 +30,28 @@ export interface Video {
   progress_message?: string
   error_message?: string
   transcript_source?: string
+  transcript_language?: string
+  transcript_language_code?: string
+  transcript_is_generated?: boolean
+}
+
+export interface LanguageInfo {
+  code: string
+  name: string
+  is_generated: boolean
+  is_translatable: boolean
+}
+
+export interface AvailableTranscriptsResponse {
+  video_id: string
+  languages: LanguageInfo[]
+  whisper_available: boolean
+  cached: boolean
+}
+
+export interface TranscriptDefaults {
+  preferred_languages: string[]
+  prefer_manual: boolean
 }
 
 export async function fetchSessions(): Promise<Session[]> {
@@ -78,11 +100,23 @@ export async function fetchSessionVideos(sessionId: string): Promise<Video[]> {
   return data.videos
 }
 
-export async function addVideo(url: string, sessionId: string): Promise<{ video_id: string; status: string }> {
+export interface AddVideoOptions {
+  url: string
+  sessionId: string
+  preferredLanguages?: string[]
+  preferManual?: boolean
+}
+
+export async function addVideo(options: AddVideoOptions): Promise<{ video_id: string; status: string }> {
+  const { url, sessionId, preferredLanguages, preferManual } = options
+  const body: Record<string, unknown> = { url, session_id: sessionId }
+  if (preferredLanguages !== undefined) body.preferred_languages = preferredLanguages
+  if (preferManual !== undefined) body.prefer_manual = preferManual
+
   const response = await fetch(`${API_BASE}/videos/add`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url, session_id: sessionId }),
+    body: JSON.stringify(body),
   })
   if (!response.ok) {
     const errorData = await response.json()
@@ -307,4 +341,19 @@ export async function deletePatternResult(videoId: string, patternId: string): P
     method: "DELETE",
   })
   if (!response.ok) throw new Error("Failed to delete pattern result")
+}
+
+export async function fetchAvailableTranscripts(videoId: string): Promise<AvailableTranscriptsResponse> {
+  const response = await fetch(`${API_BASE}/languages/videos/${videoId}/available-transcripts`)
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || "Failed to fetch available transcripts")
+  }
+  return response.json()
+}
+
+export async function fetchTranscriptDefaults(): Promise<TranscriptDefaults> {
+  const response = await fetch(`${API_BASE}/languages/defaults`)
+  if (!response.ok) throw new Error("Failed to fetch transcript defaults")
+  return response.json()
 }

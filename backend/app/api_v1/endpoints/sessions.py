@@ -12,7 +12,7 @@ from app.api_v1.schemas import (
     SessionVideoResponse,
 )
 from app.db.database import get_session
-from app.db.models import Message, SessionVideo, Video, utc_now
+from app.db.models import Chunk, Message, PatternResult, SessionVideo, Video, utc_now
 from app.db.models import Session as DBSession
 
 router = APIRouter()
@@ -158,11 +158,58 @@ def update_session(
 
 @router.delete("/{session_id}")
 def delete_session(session_id: str, db: Session = Depends(get_session)):
+    """Delete a session and hard-delete ALL videos in it (from all sessions)."""
     session = db.get(DBSession, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    # Get all videos in this session
+    session_videos = db.exec(
+        select(SessionVideo).where(SessionVideo.session_id == session_id)
+    ).all()
+
+    video_ids = [sv.video_id for sv in session_videos]
+    videos_deleted = 0
+
+    # Hard delete each video (from ALL sessions, not just this one)
+    for video_id in video_ids:
+        video = db.get(Video, video_id)
+        if not video:
+            continue
+
+        # Delete all session-video links for this video (across ALL sessions)
+        all_sv_links = db.exec(
+            select(SessionVideo).where(SessionVideo.video_id == video_id)
+        ).all()
+        for sv in all_sv_links:
+            db.delete(sv)
+
+        # Delete all chunks
+        chunks = db.exec(select(Chunk).where(Chunk.video_id == video_id)).all()
+        for chunk in chunks:
+            db.delete(chunk)
+
+        # Delete all pattern results
+        pattern_results = db.exec(
+            select(PatternResult).where(PatternResult.video_id == video_id)
+        ).all()
+        for pr in pattern_results:
+            db.delete(pr)
+
+        # Delete the video
+        db.delete(video)
+        videos_deleted += 1
+
+    # Delete messages for this session
+    messages = db.exec(select(Message).where(Message.session_id == session_id)).all()
+    for msg in messages:
+        db.delete(msg)
+
+    # Delete the session itself
     db.delete(session)
     db.commit()
 
-    return {"success": True}
+    return {
+        "success": True,
+        "videos_deleted": videos_deleted,
+    }

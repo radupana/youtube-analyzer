@@ -1,6 +1,7 @@
 """Tests for embedding service."""
 
 import numpy as np
+import pytest
 
 from app.services.embeddings import (
     EMBEDDING_DIMENSION,
@@ -16,17 +17,20 @@ class TestGenerateEmbeddings:
         assert result.shape == (0, EMBEDDING_DIMENSION)
         assert result.dtype == np.float32
 
+    @pytest.mark.requires_embeddings
     def test_single_text_returns_correct_shape(self):
         result = generate_embeddings(["Hello world"])
         assert result.shape == (1, EMBEDDING_DIMENSION)
         assert result.dtype == np.float32
 
+    @pytest.mark.requires_embeddings
     def test_multiple_texts_returns_correct_shape(self):
         texts = ["First text", "Second text", "Third text"]
         result = generate_embeddings(texts)
         assert result.shape == (3, EMBEDDING_DIMENSION)
         assert result.dtype == np.float32
 
+    @pytest.mark.requires_embeddings
     def test_similar_texts_have_higher_similarity(self):
         texts = [
             "The cat sat on the mat",
@@ -42,11 +46,13 @@ class TestGenerateEmbeddings:
 
 
 class TestGenerateQueryEmbedding:
+    @pytest.mark.requires_embeddings
     def test_returns_correct_shape(self):
         result = generate_query_embedding("What is the main topic?")
         assert result.shape == (EMBEDDING_DIMENSION,)
         assert result.dtype == np.float32
 
+    @pytest.mark.requires_embeddings
     def test_query_similar_to_matching_text(self):
         query = "What is machine learning?"
         query_embedding = generate_query_embedding(query)
@@ -64,6 +70,7 @@ class TestGenerateQueryEmbedding:
 
 
 class TestClearModel:
+    @pytest.mark.requires_embeddings
     def test_clear_model_clears_global(self):
         generate_embeddings(["test"])
         import app.services.embeddings as emb
