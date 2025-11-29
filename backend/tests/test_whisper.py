@@ -227,13 +227,18 @@ class TestTranscribeAudio:
         with patch.object(whisper_module, "whisper") as mock_whisper:
             mock_whisper.load_model.return_value = mock_model
 
-            with patch("app.services.whisper.get_whisper_config") as mock_config:
+            with (
+                patch("app.services.whisper.get_whisper_config") as mock_config,
+                patch("os.path.getsize", return_value=10000),
+            ):
                 mock_config.return_value = MagicMock(
                     model="base",
                     unload_timeout=300,
                 )
 
-                result = whisper_module._transcribe_audio("/path/to/audio.mp3")
+                result = whisper_module._transcribe_audio(
+                    "/path/to/audio.mp3", "test_video_id"
+                )
 
                 assert result == "Hello world"
                 mock_model.transcribe.assert_called_once()
@@ -245,12 +250,17 @@ class TestTranscribeAudio:
         with patch.object(whisper_module, "whisper") as mock_whisper:
             mock_whisper.load_model.return_value = mock_model
 
-            with patch("app.services.whisper.get_whisper_config") as mock_config:
+            with (
+                patch("app.services.whisper.get_whisper_config") as mock_config,
+                patch("os.path.getsize", return_value=10000),
+            ):
                 mock_config.return_value = MagicMock(
                     model="base",
                     unload_timeout=300,
                 )
 
-                result = whisper_module._transcribe_audio("/path/to/audio.mp3")
+                result = whisper_module._transcribe_audio(
+                    "/path/to/audio.mp3", "test_video_id"
+                )
 
                 assert result is None
