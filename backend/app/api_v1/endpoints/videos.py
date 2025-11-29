@@ -9,7 +9,7 @@ from enum import Enum
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, select
+from sqlmodel import Session, delete, select
 
 from app.api_v1.schemas import (
     AddVideoResponse,
@@ -439,21 +439,10 @@ async def remove_video_from_session(
     ).all()
     sessions_affected = len(all_session_videos)
 
-    # Delete all session-video links
-    for sv in all_session_videos:
-        db.delete(sv)
-
-    # Delete all chunks for this video
-    chunks = db.exec(select(Chunk).where(Chunk.video_id == video_id)).all()
-    for chunk in chunks:
-        db.delete(chunk)
-
-    # Delete all pattern results for this video
-    pattern_results = db.exec(
-        select(PatternResult).where(PatternResult.video_id == video_id)
-    ).all()
-    for pr in pattern_results:
-        db.delete(pr)
+    # Bulk delete all related data
+    db.exec(delete(SessionVideo).where(SessionVideo.video_id == video_id))
+    db.exec(delete(Chunk).where(Chunk.video_id == video_id))
+    db.exec(delete(PatternResult).where(PatternResult.video_id == video_id))
 
     # Delete the video itself
     db.delete(video)
@@ -598,21 +587,10 @@ async def delete_video(video_id: str, db: Session = Depends(get_session)):
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
 
-    # Delete all session-video links
-    for sv in db.exec(
-        select(SessionVideo).where(SessionVideo.video_id == video_id)
-    ).all():
-        db.delete(sv)
-
-    # Delete all chunks
-    for chunk in db.exec(select(Chunk).where(Chunk.video_id == video_id)).all():
-        db.delete(chunk)
-
-    # Delete all pattern results
-    for pr in db.exec(
-        select(PatternResult).where(PatternResult.video_id == video_id)
-    ).all():
-        db.delete(pr)
+    # Bulk delete all related data
+    db.exec(delete(SessionVideo).where(SessionVideo.video_id == video_id))
+    db.exec(delete(Chunk).where(Chunk.video_id == video_id))
+    db.exec(delete(PatternResult).where(PatternResult.video_id == video_id))
 
     db.delete(video)
     db.commit()
@@ -624,15 +602,14 @@ async def delete_video(video_id: str, db: Session = Depends(get_session)):
 async def clear_cache(db: Session = Depends(get_session)):
     clear_model()
 
-    chunks = db.exec(select(Chunk)).all()
-    for chunk in chunks:
-        db.delete(chunk)
+    # Count videos before deletion
+    video_count = len(db.exec(select(Video)).all())
 
-    videos = db.exec(select(Video)).all()
-    video_count = len(videos)
-    for video in videos:
-        db.delete(video)
-
+    # Bulk delete all data
+    db.exec(delete(Chunk))
+    db.exec(delete(PatternResult))
+    db.exec(delete(SessionVideo))
+    db.exec(delete(Video))
     db.commit()
 
     return {

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel import Session, func, select
+from sqlmodel import Session, delete, func, select
 
 from app.api_v1.schemas import (
     MessageResponse,
@@ -177,33 +177,17 @@ def delete_session(session_id: str, db: Session = Depends(get_session)):
         if not video:
             continue
 
-        # Delete all session-video links for this video (across ALL sessions)
-        all_sv_links = db.exec(
-            select(SessionVideo).where(SessionVideo.video_id == video_id)
-        ).all()
-        for sv in all_sv_links:
-            db.delete(sv)
-
-        # Delete all chunks
-        chunks = db.exec(select(Chunk).where(Chunk.video_id == video_id)).all()
-        for chunk in chunks:
-            db.delete(chunk)
-
-        # Delete all pattern results
-        pattern_results = db.exec(
-            select(PatternResult).where(PatternResult.video_id == video_id)
-        ).all()
-        for pr in pattern_results:
-            db.delete(pr)
+        # Bulk delete all related data
+        db.exec(delete(SessionVideo).where(SessionVideo.video_id == video_id))
+        db.exec(delete(Chunk).where(Chunk.video_id == video_id))
+        db.exec(delete(PatternResult).where(PatternResult.video_id == video_id))
 
         # Delete the video
         db.delete(video)
         videos_deleted += 1
 
-    # Delete messages for this session
-    messages = db.exec(select(Message).where(Message.session_id == session_id)).all()
-    for msg in messages:
-        db.delete(msg)
+    # Bulk delete messages for this session
+    db.exec(delete(Message).where(Message.session_id == session_id))
 
     # Delete the session itself
     db.delete(session)

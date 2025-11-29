@@ -1,6 +1,6 @@
 id: summarize
 name: "Summarize"
-description: "Concise summary with main points and conclusion"
+description: "TL;DR, key takeaways, main topics, and notable quotes"
 icon: "📝"
 category: "summary"
 
@@ -10,12 +10,12 @@ inputs:
   - channel
 
 system_prompt: |
-  You are an expert at creating clear, concise summaries.
-  Focus on the most important information and structure it logically.
-  Avoid unnecessary details while preserving key points.
+  You are an expert content analyst. Create clear, actionable summaries.
+  Focus on the most valuable information: insights, takeaways, and memorable moments.
+  Be concise but preserve key details. Start takeaways with action verbs.
 
 user_prompt: |
-  Create a concise summary of this video.
+  Summarize this video.
 
   VIDEO: {video_title}
   CHANNEL: {channel}
@@ -28,13 +28,15 @@ user_prompt: |
   Provide your summary in the following format:
 
   ## TL;DR
-  A single paragraph (2-3 sentences) capturing the essence of the content.
+  2-3 sentences capturing the essence of the content.
 
-  ## Main Points
-  - 5-7 bullet points covering the key topics discussed
-  - Each point should be one clear sentence
+  ## Key Takeaways
+  5-7 actionable insights. Start each with an action verb.
 
-  ## Conclusion
-  What is the main takeaway or call-to-action from this content?
+  ## Main Topics
+  3-5 central themes discussed.
+
+  ## Notable Quotes
+  2-3 impactful quotes representing key ideas (omit if none stand out).
 
 output_format: markdown
