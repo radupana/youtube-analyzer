@@ -19,7 +19,7 @@ except ImportError:
 try:
     import torch
 except ImportError:
-    torch = None  # type: ignore[assignment]
+    torch = None  # type: ignore
 
 try:
     from pytube import YouTube
