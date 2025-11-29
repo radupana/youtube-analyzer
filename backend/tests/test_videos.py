@@ -38,7 +38,13 @@ def test_health_check(test_client):
     client, _ = test_client
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "healthy"}
+    data = response.json()
+    assert data["status"] == "healthy"
+    assert "memory" in data
+    assert "rss_mb" in data["memory"]
+    assert "models" in data
+    assert "whisper" in data["models"]
+    assert "embeddings" in data["models"]
 
 
 def test_list_videos(test_client):

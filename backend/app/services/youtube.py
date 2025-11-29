@@ -123,10 +123,9 @@ class YouTubeService:
 
             if use_whisper_fallback:
                 try:
-                    from app.services.whisper import WhisperService
+                    from app.services.whisper import get_whisper_transcript
 
-                    whisper_service = WhisperService()
-                    whisper_transcript = whisper_service.get_whisper_transcript(
+                    whisper_transcript = get_whisper_transcript(
                         video_id, progress_callback
                     )
                     if whisper_transcript:

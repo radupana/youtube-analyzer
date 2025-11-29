@@ -1,17 +1,26 @@
-"""Whisper service for audio transcription fallback."""
+"""Whisper service for audio transcription fallback with memory management."""
 
+import gc
 import logging
 import os
 import subprocess
 import tempfile
+import threading
+import time
+from collections.abc import Callable
+from typing import Any
 
 import yt_dlp
-import yt_dlp.utils
 
 try:
     import whisper
 except ImportError:
     whisper = None
+
+try:
+    import torch
+except ImportError:
+    torch = None  # type: ignore[assignment]
 
 try:
     from pytube import YouTube
@@ -22,312 +31,331 @@ from app.core.llm_config import get_whisper_config
 
 logger = logging.getLogger(__name__)
 
+_model: Any = None
+_model_name: str | None = None
+_last_used: float = 0.0
+_lock = threading.Lock()
+_unload_timer: threading.Timer | None = None
 
-class WhisperService:
-    def __init__(self):
-        self.model = None
-        self.model_name = get_whisper_config().model
 
-    def _load_model(self):
-        """Lazy load Whisper model."""
-        if whisper is None:
-            raise RuntimeError(
-                "Whisper is not installed. Install with: pip install openai-whisper"
-            )
-        if self.model is None:
-            logger.info(f"Loading Whisper model: {self.model_name}")
-            self.model = whisper.load_model(self.model_name)
-            logger.info("Whisper model loaded successfully")
+def _get_model() -> Any:
+    """Get or load the Whisper model."""
+    global _model, _model_name, _last_used
 
-    def download_audio(self, video_id: str) -> str | None:
-        """Download audio from YouTube video."""
-        try:
-            url = f"https://www.youtube.com/watch?v={video_id}"
+    config = get_whisper_config()
 
-            # Create temp directory for audio
-            with tempfile.TemporaryDirectory() as temp_dir:
-                output_path = os.path.join(temp_dir, f"{video_id}.%(ext)s")
+    with _lock:
+        if _model is None or _model_name != config.model:
+            if whisper is None:
+                raise RuntimeError(
+                    "Whisper is not installed. Install with: pip install openai-whisper"
+                )
 
-                ydl_opts = {
-                    "format": "bestaudio/best",
-                    "outtmpl": output_path,
-                    "quiet": True,
-                    "no_warnings": True,
-                    "postprocessors": [
-                        {
-                            "key": "FFmpegExtractAudio",
-                            "preferredcodec": "mp3",
-                            "preferredquality": "192",
-                        }
-                    ],
-                }
+            if _model is not None:
+                logger.info(f"Switching model from {_model_name} to {config.model}")
+                _unload_model_internal()
 
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([url])
+            logger.info(f"Loading Whisper model: {config.model}")
+            _model = whisper.load_model(config.model)
+            _model_name = config.model
+            logger.info(f"Whisper model {config.model} loaded")
 
-                # Find the downloaded file
-                audio_file = os.path.join(temp_dir, f"{video_id}.mp3")
-                if os.path.exists(audio_file):
-                    # Read the file and return path for processing
-                    return audio_file
-                return None
+        _last_used = time.time()
+        _schedule_unload()
 
-        except Exception as e:
-            logger.error(f"Error downloading audio for {video_id}: {e}")
-            return None
+        return _model
 
-    def transcribe_audio(self, audio_path: str, progress_callback=None) -> str | None:
-        """Transcribe audio using Whisper with progress tracking."""
-        try:
-            self._load_model()
 
-            logger.info(f"Transcribing audio: {audio_path}")
+def _unload_model_internal() -> None:
+    """Internal unload without lock (caller must hold lock)."""
+    global _model, _model_name
 
-            # Create a progress callback wrapper
-            def whisper_progress_callback(progress):
-                if progress_callback:
-                    # Whisper progress is in segments, estimate percentage
-                    progress_callback(
-                        {
-                            "step": "transcribing",
-                            "progress": min(
-                                progress * 100, 99
-                            ),  # Cap at 99% until done
-                            "message": f"Transcribing audio... {int(progress * 100)}%",
-                        }
-                    )
+    if _model is not None:
+        logger.info(f"Unloading Whisper model: {_model_name}")
+        del _model
+        _model = None
+        _model_name = None
 
-            result = self.model.transcribe(
-                audio_path,
-                language="en",
-                task="transcribe",
-                verbose=False,  # Disable verbose output to reduce log noise
-                fp16=False,  # Disable FP16 to avoid warning
-            )
+        if torch is not None and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            logger.info("Cleared CUDA cache")
 
-            return result.get("text", "").strip()
+        gc.collect()
+        logger.info("Whisper model unloaded")
 
-        except Exception as e:
-            logger.error(f"Error transcribing audio: {e}")
-            return None
 
-    def download_with_ytdlp(self, video_id: str, temp_dir: str) -> str | None:
-        """Try downloading with yt-dlp."""
-        url = f"https://www.youtube.com/watch?v={video_id}"
-        audio_path = os.path.join(temp_dir, f"{video_id}.mp3")
+def unload_model() -> None:
+    """Unload Whisper model and free memory."""
+    global _unload_timer
 
-        ydl_opts = {
-            "format": "bestaudio/best",
-            "outtmpl": os.path.join(temp_dir, f"{video_id}.%(ext)s"),
-            "quiet": True,
-            "no_warnings": True,
-            "postprocessors": [
-                {
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
-                    "preferredquality": "192",
-                }
-            ],
-            # Aggressive options to bypass YouTube blocks
-            "user-agent": (
+    with _lock:
+        if _unload_timer is not None:
+            _unload_timer.cancel()
+            _unload_timer = None
+        _unload_model_internal()
+
+
+def _scheduled_unload() -> None:
+    """Called by timer to unload model after timeout."""
+    global _last_used
+
+    config = get_whisper_config()
+
+    with _lock:
+        if _model is not None:
+            idle_time = time.time() - _last_used
+            if idle_time >= config.unload_timeout:
+                logger.info(f"Auto-unloading Whisper model after {idle_time:.0f}s idle")
+                _unload_model_internal()
+            else:
+                _schedule_unload()
+
+
+def _schedule_unload() -> None:
+    """Schedule model unload after timeout (caller must hold lock)."""
+    global _unload_timer
+
+    config = get_whisper_config()
+
+    if _unload_timer is not None:
+        _unload_timer.cancel()
+        _unload_timer = None
+
+    if config.unload_timeout > 0 and _model is not None:
+        _unload_timer = threading.Timer(config.unload_timeout, _scheduled_unload)
+        _unload_timer.daemon = True
+        _unload_timer.start()
+
+
+def is_model_loaded() -> bool:
+    """Check if Whisper model is currently loaded."""
+    with _lock:
+        return _model is not None
+
+
+def get_model_info() -> dict[str, Any]:
+    """Get current model status for health endpoint."""
+    with _lock:
+        return {
+            "loaded": _model is not None,
+            "model_name": _model_name,
+            "last_used": _last_used if _last_used > 0 else None,
+            "idle_seconds": int(time.time() - _last_used) if _last_used > 0 else None,
+        }
+
+
+def _transcribe_audio(audio_path: str) -> str | None:
+    """Transcribe audio using Whisper."""
+    try:
+        model = _get_model()
+        logger.info(f"Transcribing audio: {audio_path}")
+
+        result = model.transcribe(
+            audio_path,
+            language="en",
+            task="transcribe",
+            verbose=False,
+            fp16=False,
+        )
+
+        return result.get("text", "").strip()
+
+    except Exception as e:
+        logger.error(f"Error transcribing audio: {e}")
+        return None
+
+
+def _download_with_ytdlp(video_id: str, temp_dir: str) -> str | None:
+    """Try downloading with yt-dlp."""
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    audio_path = os.path.join(temp_dir, f"{video_id}.mp3")
+
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "outtmpl": os.path.join(temp_dir, f"{video_id}.%(ext)s"),
+        "quiet": True,
+        "no_warnings": True,
+        "postprocessors": [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }
+        ],
+        "user-agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "referer": "https://www.youtube.com/",
+        "extractor-args": "youtube:player_client=android,web_creator,ios",
+        "http_headers": {
+            "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/120.0.0.0 Safari/537.36"
             ),
-            "referer": "https://www.youtube.com/",
-            "extractor-args": "youtube:player_client=android,web_creator,ios",
-            "http_headers": {
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                ),
-                "Accept": (
-                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-                ),
-                "Accept-Language": "en-US,en;q=0.5",
-                "Sec-Fetch-Mode": "navigate",
-            },
-            "geo_bypass": True,
-            "nocheckcertificate": True,
-        }
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Sec-Fetch-Mode": "navigate",
+        },
+        "geo_bypass": True,
+        "nocheckcertificate": True,
+    }
 
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
-            if os.path.exists(audio_path):
-                return audio_path
-        except Exception as e:
-            logger.warning(f"yt-dlp failed: {e}")
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+        if os.path.exists(audio_path):
+            return audio_path
+    except Exception as e:
+        logger.warning(f"yt-dlp failed: {e}")
+    return None
+
+
+def _download_with_pytube(video_id: str, temp_dir: str) -> str | None:
+    """Try downloading with pytube as fallback."""
+    if YouTube is None:
         return None
 
-    def download_with_pytube(self, video_id: str, temp_dir: str) -> str | None:
-        """Try downloading with pytube as fallback."""
-        if YouTube is None:
-            return None
+    try:
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        audio_path = os.path.join(temp_dir, f"{video_id}.mp3")
 
-        try:
-            url = f"https://www.youtube.com/watch?v={video_id}"
-            audio_path = os.path.join(temp_dir, f"{video_id}.mp3")
+        yt = YouTube(url, use_oauth=False, allow_oauth_cache=False)
+        audio_stream = yt.streams.filter(only_audio=True).first()
 
-            yt = YouTube(url, use_oauth=False, allow_oauth_cache=False)
-            audio_stream = yt.streams.filter(only_audio=True).first()
+        if audio_stream:
+            temp_file = audio_stream.download(
+                output_path=temp_dir, filename=f"{video_id}.mp4"
+            )
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-i",
+                    temp_file,
+                    "-vn",
+                    "-ar",
+                    "44100",
+                    "-ac",
+                    "2",
+                    "-b:a",
+                    "192k",
+                    audio_path,
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            os.remove(temp_file)
 
-            if audio_stream:
-                # Download as mp4 first
-                temp_file = audio_stream.download(
-                    output_path=temp_dir, filename=f"{video_id}.mp4"
-                )
-                # Convert to mp3 using ffmpeg
-                subprocess.run(
+            if os.path.exists(audio_path):
+                logger.info(f"Downloaded with pytube for {video_id}")
+                return audio_path
+    except Exception as e:
+        logger.warning(f"pytube failed: {e}")
+    return None
+
+
+def _download_with_ytdlp_update(video_id: str, temp_dir: str) -> str | None:
+    """Try updating yt-dlp and downloading again."""
+    try:
+        logger.info("Updating yt-dlp to latest version...")
+        subprocess.run(
+            ["pip", "install", "-U", "yt-dlp"], capture_output=True, text=True
+        )
+        return _download_with_ytdlp(video_id, temp_dir)
+    except Exception as e:
+        logger.warning(f"yt-dlp update and retry failed: {e}")
+    return None
+
+
+def get_whisper_transcript(
+    video_id: str, progress_callback: Callable[[str, str], None] | None = None
+) -> str | None:
+    """Get transcript using Whisper (download audio + transcribe)."""
+    try:
+        logger.info(f"Using Whisper fallback for video {video_id}")
+
+        if progress_callback:
+            progress_callback("whisper_downloading", "Starting audio download...")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            audio_path = None
+
+            logger.info(f"Attempting to download audio for {video_id}...")
+
+            if progress_callback:
+                progress_callback("whisper_downloading", "Downloading audio...")
+            audio_path = _download_with_ytdlp(video_id, temp_dir)
+
+            if not audio_path:
+                logger.info("Trying pytube fallback...")
+                if progress_callback:
+                    progress_callback("whisper_downloading", "Retrying download...")
+                audio_path = _download_with_pytube(video_id, temp_dir)
+
+            if not audio_path:
+                logger.info("Trying yt-dlp update and retry...")
+                if progress_callback:
+                    progress_callback("whisper_downloading", "Retrying download...")
+                audio_path = _download_with_ytdlp_update(video_id, temp_dir)
+
+            if not audio_path:
+                logger.error(f"All download methods failed for {video_id}")
+                return None
+
+            if progress_callback:
+                progress_callback("whisper_downloading", "Audio downloaded")
+
+            if progress_callback:
+                if is_model_loaded():
+                    progress_callback("whisper_loading", "Whisper model ready")
+                else:
+                    progress_callback(
+                        "whisper_loading",
+                        "Loading speech recognition model...",
+                    )
+
+            duration_msg = ""
+            try:
+                result = subprocess.run(
                     [
-                        "ffmpeg",
-                        "-i",
-                        temp_file,
-                        "-vn",
-                        "-ar",
-                        "44100",
-                        "-ac",
-                        "2",
-                        "-b:a",
-                        "192k",
+                        "ffprobe",
+                        "-v",
+                        "error",
+                        "-show_entries",
+                        "format=duration",
+                        "-of",
+                        "default=noprint_wrappers=1:nokey=1",
                         audio_path,
                     ],
                     capture_output=True,
                     text=True,
-                    check=True,
                 )
-                os.remove(temp_file)
-
-                if os.path.exists(audio_path):
-                    logger.info(f"Successfully downloaded with pytube for {video_id}")
-                    return audio_path
-        except Exception as e:
-            logger.warning(f"pytube failed: {e}")
-        return None
-
-    def download_with_ytdlp_update(self, video_id: str, temp_dir: str) -> str | None:
-        """Try updating yt-dlp and downloading again."""
-        try:
-            # Update yt-dlp first
-            logger.info("Updating yt-dlp to latest version...")
-            subprocess.run(
-                ["pip", "install", "-U", "yt-dlp"], capture_output=True, text=True
-            )
-
-            # Try download again with updated version
-            return self.download_with_ytdlp(video_id, temp_dir)
-        except Exception as e:
-            logger.warning(f"yt-dlp update and retry failed: {e}")
-        return None
-
-    def get_whisper_transcript(
-        self, video_id: str, progress_callback=None
-    ) -> str | None:
-        """Get transcript using Whisper (download audio + transcribe)."""
-        try:
-            logger.info(f"Using Whisper fallback for video {video_id}")
+                audio_duration = float(result.stdout.strip()) if result.stdout else 0
+                if audio_duration > 0:
+                    duration_msg = f" (~{int(audio_duration)}s audio)"
+            except Exception:
+                pass
 
             if progress_callback:
-                progress_callback("whisper_downloading", "Starting audio download...")
+                progress_callback(
+                    "whisper_transcribing",
+                    f"Transcribing audio{duration_msg}...",
+                )
 
-            # Create a temporary directory that persists through the function
-            with tempfile.TemporaryDirectory() as temp_dir:
-                audio_path = None
+            config = get_whisper_config()
+            logger.info(f"Transcribing with Whisper model {config.model}...")
+            transcript = _transcribe_audio(audio_path)
 
-                # Try multiple download methods in order
-                logger.info(f"Attempting to download audio for {video_id}...")
-
-                # Method 1: yt-dlp with Android client
+            if transcript:
+                logger.info(f"Successfully transcribed {video_id} with Whisper")
                 if progress_callback:
-                    progress_callback("whisper_downloading", "Downloading audio...")
-                audio_path = self.download_with_ytdlp(video_id, temp_dir)
+                    progress_callback("whisper_complete", "Transcription complete")
 
-                # Method 2: pytube as fallback
-                if not audio_path:
-                    logger.info("Trying pytube fallback...")
-                    if progress_callback:
-                        progress_callback(
-                            "whisper_downloading",
-                            "Retrying download...",
-                        )
-                    audio_path = self.download_with_pytube(video_id, temp_dir)
+            return transcript
 
-                # Method 3: Update yt-dlp and try again
-                if not audio_path:
-                    logger.info("Trying yt-dlp update and retry...")
-                    if progress_callback:
-                        progress_callback(
-                            "whisper_downloading",
-                            "Retrying download...",
-                        )
-                    audio_path = self.download_with_ytdlp_update(video_id, temp_dir)
-
-                if not audio_path:
-                    logger.error(f"All download methods failed for {video_id}")
-                    return None
-
-                if progress_callback:
-                    progress_callback("whisper_downloading", "Audio downloaded")
-
-                # Loading model
-                if progress_callback:
-                    if self.model:
-                        progress_callback("whisper_loading", "Whisper model ready")
-                    else:
-                        progress_callback(
-                            "whisper_loading",
-                            "Loading speech recognition model...",
-                        )
-
-                # Ensure model is loaded
-                if not self.model:
-                    self._load_model()
-
-                # Get audio duration for progress estimation
-                try:
-                    result = subprocess.run(
-                        [
-                            "ffprobe",
-                            "-v",
-                            "error",
-                            "-show_entries",
-                            "format=duration",
-                            "-of",
-                            "default=noprint_wrappers=1:nokey=1",
-                            audio_path,
-                        ],
-                        capture_output=True,
-                        text=True,
-                    )
-                    audio_duration = (
-                        float(result.stdout.strip()) if result.stdout else 0
-                    )
-                    duration_msg = (
-                        f" (~{int(audio_duration)}s audio)"
-                        if audio_duration > 0
-                        else ""
-                    )
-                except Exception:
-                    duration_msg = ""
-
-                # Transcribe audio
-                if progress_callback:
-                    progress_callback(
-                        "whisper_transcribing",
-                        f"Transcribing audio{duration_msg}...",
-                    )
-
-                logger.info(f"Transcribing with Whisper model {self.model_name}...")
-                transcript = self.transcribe_audio(audio_path, progress_callback)
-
-                if transcript:
-                    logger.info(f"Successfully transcribed {video_id} with Whisper")
-                    if progress_callback:
-                        progress_callback("whisper_complete", "Transcription complete")
-
-                return transcript
-
-        except Exception as e:
-            logger.error(f"Error in Whisper transcription for {video_id}: {e}")
-            return None
+    except Exception as e:
+        logger.error(f"Error in Whisper transcription for {video_id}: {e}")
+        return None

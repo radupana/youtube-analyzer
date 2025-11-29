@@ -32,6 +32,11 @@ def clear_model() -> None:
         _model = None
 
 
+def is_model_loaded() -> bool:
+    """Check if embedding model is currently loaded."""
+    return _model is not None
+
+
 def generate_embeddings(texts: list[str]) -> np.ndarray:
     """
     Generate embeddings for a list of texts.

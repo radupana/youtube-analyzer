@@ -19,6 +19,7 @@ default_provider: gemini-flash
 whisper:
   model: base
   fallback_enabled: true
+  unload_timeout: 300
 
 rag:
   chunk_size: 500

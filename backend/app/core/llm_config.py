@@ -17,6 +17,7 @@ class LLMProvider:
 class WhisperConfig:
     model: str = "base"
     fallback_enabled: bool = True
+    unload_timeout: int = 300
 
 
 @dataclass
@@ -68,9 +69,15 @@ def load_config(config_path: str | Path = "config.yaml") -> None:
         _current_provider_id = next(iter(_providers))
 
     whisper_cfg = config.get("whisper", {})
+    unload_timeout = whisper_cfg.get("unload_timeout", 300)
+    if not isinstance(unload_timeout, int) or unload_timeout < 0:
+        raise ValueError(
+            f"whisper.unload_timeout must be non-negative int, got {unload_timeout}"
+        )
     _whisper_config = WhisperConfig(
         model=whisper_cfg.get("model", "base"),
         fallback_enabled=whisper_cfg.get("fallback_enabled", True),
+        unload_timeout=unload_timeout,
     )
 
     rag_cfg = config.get("rag", {})
