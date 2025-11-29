@@ -1,5 +1,5 @@
-import { test, expect } from "@playwright/test"
-import { TEST_VIDEOS, TIMEOUTS } from "./helpers/fixtures"
+import { expect } from "@playwright/test"
+import { test, TEST_VIDEOS, TIMEOUTS } from "./helpers/fixtures"
 
 test.describe("Chat", () => {
   test.beforeEach(async ({ page }) => {

@@ -1,4 +1,5 @@
-import { test, expect } from "@playwright/test"
+import { expect } from "@playwright/test"
+import { test } from "./helpers/fixtures"
 
 test.describe("Smoke Tests", () => {
   test("page loads successfully", async ({ page }) => {

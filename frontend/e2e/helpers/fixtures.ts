@@ -1,3 +1,14 @@
+import { test as base } from "@playwright/test"
+import { clearDatabase } from "./database"
+
+// Extended test fixture that clears database before each test
+export const test = base.extend({})
+
+// Hook to clear database before each test for isolation
+test.beforeEach(async () => {
+  await clearDatabase()
+})
+
 export const TEST_VIDEOS = {
   A: {
     url: "https://www.youtube.com/watch?v=pDI39YKFSTY",
