@@ -183,9 +183,17 @@ class TestWhisperAutoUnload:
                 whisper_module._get_model()
                 assert whisper_module._model is not None
 
-                time.sleep(1.5)
+                # Poll for model unload with timeout (more reliable than fixed sleep)
+                max_wait = 3.0
+                poll_interval = 0.1
+                waited = 0.0
+                while whisper_module._model is not None and waited < max_wait:
+                    time.sleep(poll_interval)
+                    waited += poll_interval
 
-                assert whisper_module._model is None
+                assert whisper_module._model is None, (
+                    f"Model not unloaded after {max_wait}s"
+                )
 
 
 class TestWhisperThreadSafety:
@@ -365,11 +373,6 @@ class TestTranscriptionStatus:
 
 
 class TestDownloadFunctions:
-    def test_download_with_pytube_not_installed(self):
-        with patch.object(whisper_module, "YouTube", None):
-            result = whisper_module._download_with_pytube("test123", "/tmp")
-            assert result is None
-
     def test_download_with_ytdlp_exception(self):
         with patch("yt_dlp.YoutubeDL") as mock_ydl:
             mock_ydl.return_value.__enter__ = MagicMock(
@@ -391,21 +394,10 @@ class TestDownloadFunctions:
             result = whisper_module._download_with_ytdlp("test123", "/tmp")
             assert result is None
 
-    def test_download_with_ytdlp_update_exception(self):
-        with patch("subprocess.run", side_effect=Exception("pip failed")):
-            result = whisper_module._download_with_ytdlp_update("test123", "/tmp")
-            assert result is None
-
 
 class TestGetWhisperTranscript:
-    def test_get_whisper_transcript_all_downloads_fail(self):
-        with (
-            patch.object(whisper_module, "_download_with_ytdlp", return_value=None),
-            patch.object(whisper_module, "_download_with_pytube", return_value=None),
-            patch.object(
-                whisper_module, "_download_with_ytdlp_update", return_value=None
-            ),
-        ):
+    def test_get_whisper_transcript_download_fails(self):
+        with patch.object(whisper_module, "_download_with_ytdlp", return_value=None):
             result = whisper_module.get_whisper_transcript("test123")
             assert result is None
 
@@ -424,14 +416,7 @@ class TestGetWhisperTranscript:
         def track_progress(step, message):
             progress_calls.append((step, message))
 
-        with (
-            patch.object(whisper_module, "_download_with_ytdlp", return_value=None),
-            patch.object(whisper_module, "_download_with_pytube", return_value=None),
-            patch.object(
-                whisper_module, "_download_with_ytdlp_update", return_value=None
-            ),
-        ):
+        with patch.object(whisper_module, "_download_with_ytdlp", return_value=None):
             whisper_module.get_whisper_transcript("test123", track_progress)
 
-            # Should have called progress for downloading attempts
             assert any("download" in call[1].lower() for call in progress_calls)

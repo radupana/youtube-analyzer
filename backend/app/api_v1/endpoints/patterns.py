@@ -154,7 +154,8 @@ async def apply_pattern(
         )
 
     logger.info(f"Executing pattern {pattern_id} on video {video_id}")
-    assert video.transcript is not None
+    if video.transcript is None:
+        raise HTTPException(status_code=422, detail="Video transcript is missing")
     result = await execute_pattern(
         pattern=pattern,
         video_title=video.title,
@@ -226,7 +227,8 @@ async def refresh_pattern(
         db.commit()
 
     logger.info(f"Refreshing pattern {pattern_id} on video {video_id}")
-    assert video.transcript is not None
+    if video.transcript is None:
+        raise HTTPException(status_code=422, detail="Video transcript is missing")
     result = await execute_pattern(
         pattern=pattern,
         video_title=video.title,

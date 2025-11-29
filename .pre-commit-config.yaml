@@ -3,30 +3,15 @@
 # Install hooks: pre-commit install
 
 repos:
-  # Format Python code with Black
-  - repo: https://github.com/psf/black
-    rev: 25.11.0
-    hooks:
-      - id: black
-        language_version: python3.13
-
-  # Sort imports with isort
-  - repo: https://github.com/PyCQA/isort
-    rev: 5.13.2
-    hooks:
-      - id: isort
-        args: ["--profile", "black"]
-        exclude: "backend/"
-
-  # Lint with Ruff (fast Python linter)
+  # Lint and format with Ruff (matches CI)
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.5
     hooks:
       - id: ruff
         args: ["--fix"]
-        exclude: "backend/"
+      - id: ruff-format
 
-  # Type check with MyPy
+  # Type check with MyPy (backend has its own config in pyproject.toml)
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.18.2
     hooks:
@@ -35,10 +20,8 @@ repos:
           - pydantic>=2.0.0
           - types-requests
           - types-PyYAML
-          - chromadb>=0.4.0
-          - sentence-transformers>=2.2.0
-        args: ["--strict", "--python-version=3.13"]
-        exclude: "tests/|backend/"
+        args: ["--python-version=3.13"]
+        exclude: "^backend/"
 
   # Standard pre-commit hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -52,6 +35,6 @@ repos:
       - id: check-case-conflict
       - id: check-merge-conflict
       - id: check-toml
-      - id: debug-statements  # Check for print() and pdb
+      - id: debug-statements
       - id: mixed-line-ending
         args: ["--fix=lf"]

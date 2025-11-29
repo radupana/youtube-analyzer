@@ -11,11 +11,9 @@ pydantic-settings>=2.6.0
 google-api-python-client>=2.127.0
 youtube-transcript-api>=1.1.0
 yt-dlp
-pytube
 
 # Whisper transcription (requires torch)
 openai-whisper
-ffmpeg-python>=0.2.0
 
 # LLM
 litellm>=1.50.0

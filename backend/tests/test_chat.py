@@ -99,6 +99,11 @@ def test_stream_message(test_client, mock_llm_stream):
     assert "data:" in content
     assert "[DONE]" in content
 
+    # Verify streamed content contains expected chunks
+    # Mock returns: ["Hello", " ", "world", "!"]
+    assert "Hello" in content
+    assert "world" in content
+
 
 def test_stream_message_with_session_id(test_client, mock_llm_stream):
     client, _ = test_client

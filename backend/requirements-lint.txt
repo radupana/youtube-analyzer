@@ -7,7 +7,7 @@ pydantic>=2.10.0
 pydantic-settings>=2.6.0
 
 # Database
-sqlmodel>=0.0.22
+sqlmodel>=0.0.27
 
 # Config
 pyyaml>=6.0

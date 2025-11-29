@@ -1,4 +1,18 @@
-const API_BASE = "http://localhost:8000/api/v1"
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
+
+interface ValidationError {
+  msg: string
+}
+
+function isValidationErrorArray(detail: unknown): detail is ValidationError[] {
+  return (
+    Array.isArray(detail) &&
+    detail.every(
+      (item): item is ValidationError =>
+        typeof item === "object" && item !== null && typeof item.msg === "string"
+    )
+  )
+}
 
 export interface Session {
   id: string
@@ -122,7 +136,7 @@ export async function addVideo(options: AddVideoOptions): Promise<{ video_id: st
     const errorData = await response.json()
     const detail = errorData.detail
     if (typeof detail === "string") throw new Error(detail)
-    if (Array.isArray(detail)) throw new Error(detail.map((e: { msg: string }) => e.msg).join(", "))
+    if (isValidationErrorArray(detail)) throw new Error(detail.map((e) => e.msg).join(", "))
     throw new Error("Failed to add video")
   }
   return response.json()
@@ -151,7 +165,7 @@ export async function sendChatMessageStream(
     const errorData = await response.json()
     const detail = errorData.detail
     if (typeof detail === "string") throw new Error(detail)
-    if (Array.isArray(detail)) throw new Error(detail.map((e: { msg: string }) => e.msg).join(", "))
+    if (isValidationErrorArray(detail)) throw new Error(detail.map((e) => e.msg).join(", "))
     throw new Error("Failed to send message")
   }
 
@@ -162,40 +176,41 @@ export async function sendChatMessageStream(
   let isFirstMessage = true
   let buffer = ""
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
 
-    buffer += decoder.decode(value, { stream: true })
+      buffer += decoder.decode(value, { stream: true })
 
-    // Process complete lines only (SSE format: "data: ...\n\n")
-    const lines = buffer.split("\n")
-    // Keep the last incomplete line in the buffer
-    buffer = lines.pop() || ""
+      const lines = buffer.split("\n")
+      buffer = lines.pop() || ""
 
-    for (const line of lines) {
-      if (line.startsWith("data: ")) {
-        const data = line.slice(6)
-        if (data === "[DONE]") continue
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          const data = line.slice(6)
+          if (data === "[DONE]") continue
 
-        if (isFirstMessage) {
-          onSessionId?.(data)
-          isFirstMessage = false
-        } else {
-          const unescaped = data.replace(/\\n/g, "\n")
-          onChunk(unescaped)
+          if (isFirstMessage) {
+            onSessionId?.(data)
+            isFirstMessage = false
+          } else {
+            const unescaped = data.replace(/\\n/g, "\n")
+            onChunk(unescaped)
+          }
         }
       }
     }
-  }
 
-  // Process any remaining data in buffer
-  if (buffer.startsWith("data: ")) {
-    const data = buffer.slice(6)
-    if (data !== "[DONE]" && !isFirstMessage) {
-      const unescaped = data.replace(/\\n/g, "\n")
-      onChunk(unescaped)
+    if (buffer.startsWith("data: ")) {
+      const data = buffer.slice(6)
+      if (data !== "[DONE]" && !isFirstMessage) {
+        const unescaped = data.replace(/\\n/g, "\n")
+        onChunk(unescaped)
+      }
     }
+  } finally {
+    reader.releaseLock()
   }
 }
 

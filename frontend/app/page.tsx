@@ -138,14 +138,12 @@ export default function Home() {
     loadProviders()
   }, [])
 
+  const hasProcessingVideos = videos.some(
+    v => v.status === "pending" || v.status === "processing"
+  )
+
   useEffect(() => {
-    if (!sessionId) return
-
-    const hasProcessingVideos = videos.some(
-      v => v.status === "pending" || v.status === "processing"
-    )
-
-    if (!hasProcessingVideos) return
+    if (!sessionId || !hasProcessingVideos) return
 
     const interval = setInterval(async () => {
       try {
@@ -157,7 +155,7 @@ export default function Home() {
     }, 1000)
 
     return () => clearInterval(interval)
-  }, [sessionId, videos])
+  }, [sessionId, hasProcessingVideos])
 
   const handleSessionSelect = async (sid: string) => {
     await loadSession(sid)
