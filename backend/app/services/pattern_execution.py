@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from litellm.exceptions import APIError, AuthenticationError, RateLimitError
 
 from app.core.llm_config import get_current_provider
+from app.db.models import utc_now
 from app.services.patterns import Pattern, format_pattern_prompt
 from app.services.rag import has_rag_data, retrieve_context_for_query
 
@@ -106,5 +107,5 @@ async def execute_pattern(
     return PatternResult(
         content=content,
         model_used=provider.model,
-        created_at=datetime.now(),
+        created_at=utc_now(),
     )
