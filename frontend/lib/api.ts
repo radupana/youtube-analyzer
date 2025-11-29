@@ -1,5 +1,19 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
 
+interface ValidationError {
+  msg: string
+}
+
+function isValidationErrorArray(detail: unknown): detail is ValidationError[] {
+  return (
+    Array.isArray(detail) &&
+    detail.every(
+      (item): item is ValidationError =>
+        typeof item === "object" && item !== null && typeof item.msg === "string"
+    )
+  )
+}
+
 export interface Session {
   id: string
   title: string
@@ -122,7 +136,7 @@ export async function addVideo(options: AddVideoOptions): Promise<{ video_id: st
     const errorData = await response.json()
     const detail = errorData.detail
     if (typeof detail === "string") throw new Error(detail)
-    if (Array.isArray(detail)) throw new Error(detail.map((e: { msg: string }) => e.msg).join(", "))
+    if (isValidationErrorArray(detail)) throw new Error(detail.map((e) => e.msg).join(", "))
     throw new Error("Failed to add video")
   }
   return response.json()
@@ -151,7 +165,7 @@ export async function sendChatMessageStream(
     const errorData = await response.json()
     const detail = errorData.detail
     if (typeof detail === "string") throw new Error(detail)
-    if (Array.isArray(detail)) throw new Error(detail.map((e: { msg: string }) => e.msg).join(", "))
+    if (isValidationErrorArray(detail)) throw new Error(detail.map((e) => e.msg).join(", "))
     throw new Error("Failed to send message")
   }
 

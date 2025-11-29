@@ -308,8 +308,8 @@ def get_whisper_transcript(
                 audio_duration = float(result.stdout.strip()) if result.stdout else 0
                 if audio_duration > 0:
                     duration_msg = f" (~{int(audio_duration)}s audio)"
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Could not get audio duration: {e}")
 
             # Check if another transcription is in progress and show waiting status
             current = get_current_transcription()

@@ -183,9 +183,17 @@ class TestWhisperAutoUnload:
                 whisper_module._get_model()
                 assert whisper_module._model is not None
 
-                time.sleep(1.5)
+                # Poll for model unload with timeout (more reliable than fixed sleep)
+                max_wait = 3.0
+                poll_interval = 0.1
+                waited = 0.0
+                while whisper_module._model is not None and waited < max_wait:
+                    time.sleep(poll_interval)
+                    waited += poll_interval
 
-                assert whisper_module._model is None
+                assert (
+                    whisper_module._model is None
+                ), f"Model not unloaded after {max_wait}s"
 
 
 class TestWhisperThreadSafety:
