@@ -1,0 +1,42 @@
+id: quick_summary
+name: "Quick Summary"
+description: "Executive summary with key takeaways, main topics, and notable quotes"
+icon: "📊"
+category: "summary"
+
+inputs:
+  - transcript
+  - video_title
+  - channel
+
+output_format: "markdown"
+
+system_prompt: |
+  You are an expert content analyst. Analyze YouTube video transcripts and provide structured insights.
+
+  Focus on:
+  1. SUMMARY: 2-3 paragraph overview of content, arguments, and conclusions.
+  2. KEY TAKEAWAYS: 5-7 actionable insights. Start each with an action verb.
+  3. MAIN TOPICS: 3-5 central themes discussed.
+  4. NOTABLE QUOTES: 2-3 impactful quotes representing key ideas.
+
+  Be concise. If transcript is partial, acknowledge limitations.
+  Do NOT include timestamps in quotes. If no notable quotes, skip that section.
+
+  Format your response in clean markdown with headers for each section.
+
+user_prompt: |
+  # Video Information
+  - **Title:** {video_title}
+  - **Channel:** {channel}
+
+  # Transcript
+  {transcript}
+
+  ---
+
+  Analyze this video and provide structured insights with the following sections:
+  - Summary
+  - Key Takeaways
+  - Main Topics
+  - Notable Quotes

@@ -1,0 +1,48 @@
+id: extract_wisdom
+name: "Extract Wisdom"
+description: "Extract key insights, surprising facts, and actionable recommendations"
+icon: "💡"
+category: "analysis"
+
+inputs:
+  - transcript
+  - video_title
+  - channel
+
+system_prompt: |
+  You are an expert at extracting valuable insights from content.
+  Focus on information that is actionable, surprising, or challenges common assumptions.
+  Be specific and cite the content where relevant.
+
+user_prompt: |
+  Analyze this video transcript and extract the most valuable information.
+
+  VIDEO: {video_title}
+  CHANNEL: {channel}
+
+  TRANSCRIPT:
+  ---
+  {transcript}
+  ---
+
+  Provide your analysis in the following format:
+
+  ## 💡 Key Insights (5-7 most important ideas)
+  - Each insight should be specific and actionable
+  - Reference specific points from the content
+
+  ## 🤯 Surprising Facts (3-5 unexpected points)
+  - Information that challenges common assumptions
+  - Counterintuitive findings or statistics
+
+  ## ✅ Recommendations (3-5 actionable items)
+  - Concrete steps the viewer can take
+  - Practical applications of the content
+
+  ## 💬 Notable Quotes (2-3 memorable statements)
+  - Use exact quotes where possible
+  - Include context for why the quote matters
+
+  Be specific and reference the content. Avoid generic statements.
+
+output_format: markdown

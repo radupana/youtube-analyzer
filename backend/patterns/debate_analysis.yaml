@@ -1,0 +1,53 @@
+id: debate_analysis
+name: "Debate Analysis"
+description: "Analyze arguments, evidence, and logical structure"
+icon: "⚖️"
+category: "analysis"
+
+inputs:
+  - transcript
+  - video_title
+  - channel
+
+system_prompt: |
+  You are an expert at analyzing arguments and debates.
+  Focus on identifying claims, evidence, logical structure, and potential fallacies.
+  Be objective and analyze all sides fairly.
+
+user_prompt: |
+  Analyze the arguments and logic in this video.
+
+  VIDEO: {video_title}
+  CHANNEL: {channel}
+
+  TRANSCRIPT:
+  ---
+  {transcript}
+  ---
+
+  Provide your analysis in the following format:
+
+  ## Main Claims
+  What are the primary arguments or positions being made?
+  - Claim 1: [statement]
+  - Claim 2: [statement]
+
+  ## Evidence Presented
+  What evidence or support is provided for each claim?
+  - For Claim 1: [evidence type and strength]
+  - For Claim 2: [evidence type and strength]
+
+  ## Counterarguments
+  What opposing viewpoints are addressed (or should be)?
+  - Counterargument 1: [statement]
+  - Counterargument 2: [statement]
+
+  ## Logical Analysis
+  - Are there any logical fallacies or weak arguments?
+  - What assumptions are being made?
+  - How strong is the overall reasoning?
+
+  ## Verdict
+  A balanced assessment of the argument's strengths and weaknesses.
+
+output_format: markdown

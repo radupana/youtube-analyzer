@@ -21,7 +21,7 @@ from app.api_v1.schemas import (
 )
 from app.api_v1.schemas import Video as VideoSchema
 from app.db.database import get_engine, get_session
-from app.db.models import Chunk, SessionVideo, Video, VideoAnalysis, utc_now
+from app.db.models import Chunk, PatternResult, SessionVideo, Video, utc_now
 from app.db.models import Session as DBSession
 from app.services.embeddings import clear_model
 from app.services.export import export_json, export_markdown, export_srt, export_txt
@@ -398,17 +398,19 @@ async def export_transcript(
             media_type="text/srt; charset=utf-8",
         )
 
-    # JSON format - include chunks and analysis if available
+    # JSON format - include chunks and pattern results if available
     if format == ExportFormat.JSON:
         chunks = db.exec(
             select(Chunk).where(Chunk.video_id == video_id).order_by(Chunk.start_time)  # type: ignore[arg-type]
         ).all()
 
-    analysis = db.exec(
-        select(VideoAnalysis).where(VideoAnalysis.video_id == video_id)
-    ).first()
+    pattern_results = db.exec(
+        select(PatternResult).where(PatternResult.video_id == video_id)
+    ).all()
 
-    data = export_json(video, list(chunks) if chunks else None, analysis)
+    data = export_json(
+        video, list(chunks) if chunks else None, list(pattern_results) or None
+    )
     return JSONResponse(
         data,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},

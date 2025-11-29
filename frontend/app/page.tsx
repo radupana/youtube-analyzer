@@ -1,14 +1,26 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
-import { Copy, Check, Download, Sparkles, RefreshCw, FileText, X } from "lucide-react"
+import { useState, useEffect, useCallback, useRef } from "react"
+import ReactMarkdown from "react-markdown"
+import { Copy, Check, Download, Sparkles, RefreshCw, FileText, Trash2 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { SessionSidebar } from "@/components/session-sidebar"
-import { AnalysisCard } from "@/components/analysis-card"
 import { TranscriptViewer } from "@/components/transcript-viewer"
+import { PatternSelector } from "@/components/pattern-selector"
+import { PatternResult } from "@/components/pattern-result"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,24 +28,28 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import {
   Video,
-  VideoAnalysis,
   TranscriptResponse,
   ExportFormat,
+  PatternResult as PatternResultType,
   fetchSession,
   fetchSessionVideos,
   addVideo,
   removeVideo,
   fetchTaskProgress,
-  sendChatMessage,
+  sendChatMessageStream,
   fetchProviders,
   fetchCurrentProvider,
   setProvider,
   createSession,
   exportTranscript,
   copyTranscript,
-  analyzeVideo,
-  getAnalysis,
   fetchTranscript,
 } from "@/lib/api"
 
@@ -73,10 +89,12 @@ export default function Home() {
   const [currentProvider, setCurrentProvider] = useState<LLMProvider | null>(null)
   const [initializing, setInitializing] = useState(true)
   const [copiedVideoId, setCopiedVideoId] = useState<string | null>(null)
-  const [videoAnalyses, setVideoAnalyses] = useState<Record<string, VideoAnalysis>>({})
-  const [analyzingVideo, setAnalyzingVideo] = useState<string | null>(null)
   const [activeTranscript, setActiveTranscript] = useState<TranscriptResponse | null>(null)
   const [loadingTranscript, setLoadingTranscript] = useState<string | null>(null)
+  const [patternResult, setPatternResult] = useState<PatternResultType | null>(null)
+  const [selectedVideoForPattern, setSelectedVideoForPattern] = useState<string | null>(null)
+  const [videoToDelete, setVideoToDelete] = useState<Video | null>(null)
+  const streamingRef = useRef(false)
 
   const loadSession = useCallback(async (sid: string) => {
     try {
@@ -211,20 +229,27 @@ export default function Home() {
     }
   }
 
-  const handleRemoveVideo = async (videoId: string) => {
-    if (!sessionId) return
+  const handleRemoveVideo = async (video: Video) => {
+    setVideoToDelete(video)
+  }
+
+  const confirmRemoveVideo = async () => {
+    if (!sessionId || !videoToDelete) return
 
     try {
-      await removeVideo(sessionId, videoId)
+      await removeVideo(sessionId, videoToDelete.id)
       const updatedVideos = await fetchSessionVideos(sessionId)
       setVideos(updatedVideos)
     } catch (error) {
       console.error("Error removing video:", error)
     }
+    setVideoToDelete(null)
   }
 
   const handleSendMessage = async () => {
     if (!chatInput.trim() || !sessionId) return
+    if (streamingRef.current) return // Prevent double invocation
+    streamingRef.current = true
 
     const userMessage: ChatMessage = { role: "user", content: chatInput }
     setMessages(prev => [...prev, userMessage])
@@ -232,18 +257,34 @@ export default function Home() {
     setChatInput("")
     setSendingMessage(true)
 
+    const assistantMessage: ChatMessage = { role: "assistant", content: "" }
+    setMessages(prev => [...prev, assistantMessage])
+
     try {
-      const data = await sendChatMessage(messageText, sessionId)
-      const assistantMessage: ChatMessage = { role: "assistant", content: data.response }
-      setMessages(prev => [...prev, assistantMessage])
+      await sendChatMessageStream(
+        messageText,
+        sessionId,
+        (chunk) => {
+          setMessages(prev =>
+            prev.map((msg, i) =>
+              i === prev.length - 1 && msg.role === "assistant"
+                ? { ...msg, content: msg.content + chunk }
+                : msg
+            )
+          )
+        }
+      )
     } catch (error) {
-      const errorMessage: ChatMessage = {
-        role: "assistant",
-        content: `Error: ${error instanceof Error ? error.message : "Failed to get response"}`,
-      }
-      setMessages(prev => [...prev, errorMessage])
+      setMessages(prev =>
+        prev.map((msg, i) =>
+          i === prev.length - 1 && msg.role === "assistant"
+            ? { ...msg, content: `Error: ${error instanceof Error ? error.message : "Failed to get response"}` }
+            : msg
+        )
+      )
     }
     setSendingMessage(false)
+    streamingRef.current = false
   }
 
   const handleProviderChange = async (providerId: string) => {
@@ -283,17 +324,6 @@ export default function Home() {
     }
   }
 
-  const handleAnalyze = async (videoId: string, forceRegenerate: boolean = false) => {
-    setAnalyzingVideo(videoId)
-    try {
-      const analysis = await analyzeVideo(videoId, forceRegenerate)
-      setVideoAnalyses(prev => ({ ...prev, [videoId]: analysis }))
-    } catch (error) {
-      console.error("Analysis failed:", error)
-    }
-    setAnalyzingVideo(null)
-  }
-
   const handleViewTranscript = async (videoId: string) => {
     if (activeTranscript?.video_id === videoId) {
       setActiveTranscript(null)
@@ -309,26 +339,6 @@ export default function Home() {
     }
     setLoadingTranscript(null)
   }
-
-  useEffect(() => {
-    const loadAnalyses = async () => {
-      for (const video of videos) {
-        if (video.status === "ready" && !videoAnalyses[video.id]) {
-          try {
-            const analysis = await getAnalysis(video.id)
-            if (analysis) {
-              setVideoAnalyses(prev => ({ ...prev, [video.id]: analysis }))
-            }
-          } catch (error) {
-            console.error(`Failed to load analysis for ${video.id}:`, error)
-          }
-        }
-      }
-    }
-    if (videos.length > 0) {
-      loadAnalyses()
-    }
-  }, [videos])
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -462,82 +472,103 @@ export default function Home() {
                                 {video.transcript_source === "whisper" && <span className="text-blue-600"> · Whisper</span>}
                               </div>
                             </div>
-                            <div className="flex items-center gap-1">
-                              {video.status === "ready" && (
-                                <>
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    onClick={() => handleAnalyze(video.id)}
-                                    disabled={analyzingVideo === video.id}
-                                    className="h-6 w-6 p-0"
-                                    title={videoAnalyses[video.id] ? "View analysis" : "Analyze video"}
-                                  >
-                                    {analyzingVideo === video.id ? (
-                                      <RefreshCw className="h-3 w-3 animate-spin" />
-                                    ) : (
-                                      <Sparkles className={`h-3 w-3 ${videoAnalyses[video.id] ? "text-yellow-500" : ""}`} />
-                                    )}
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    onClick={() => handleViewTranscript(video.id)}
-                                    disabled={loadingTranscript === video.id}
-                                    className="h-6 w-6 p-0"
-                                    title={activeTranscript?.video_id === video.id ? "Hide transcript" : "View transcript"}
-                                  >
-                                    {loadingTranscript === video.id ? (
-                                      <RefreshCw className="h-3 w-3 animate-spin" />
-                                    ) : (
-                                      <FileText className={`h-3 w-3 ${activeTranscript?.video_id === video.id ? "text-blue-500" : ""}`} />
-                                    )}
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    onClick={() => handleCopy(video.id)}
-                                    className="h-6 w-6 p-0"
-                                    title="Copy transcript"
-                                  >
-                                    {copiedVideoId === video.id ? (
-                                      <Check className="h-3 w-3 text-green-600" />
-                                    ) : (
-                                      <Copy className="h-3 w-3" />
-                                    )}
-                                  </Button>
-                                  <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                      <Button size="sm" variant="ghost" className="h-6 w-6 p-0" title="Download">
-                                        <Download className="h-3 w-3" />
-                                      </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end">
-                                      <DropdownMenuItem onClick={() => handleExport(video.id, "txt")}>
-                                        Plain Text (.txt)
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem onClick={() => handleExport(video.id, "md")}>
-                                        Markdown (.md)
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem onClick={() => handleExport(video.id, "srt")}>
-                                        Subtitles (.srt)
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem onClick={() => handleExport(video.id, "json")}>
-                                        JSON (.json)
-                                      </DropdownMenuItem>
-                                    </DropdownMenuContent>
-                                  </DropdownMenu>
-                                </>
-                              )}
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => handleRemoveVideo(video.id)}
-                                className="shrink-0 h-6 px-2 text-red-600 hover:text-red-700"
-                              >
-                                ×
-                              </Button>
-                            </div>
+                            <TooltipProvider delayDuration={200}>
+                              <div className="flex items-center gap-1">
+                                {video.status === "ready" && (
+                                  <>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          onClick={() => setSelectedVideoForPattern(selectedVideoForPattern === video.id ? null : video.id)}
+                                          className="h-6 w-6 p-0"
+                                        >
+                                          <Sparkles className={`h-3 w-3 ${selectedVideoForPattern === video.id ? "text-yellow-500" : ""}`} />
+                                        </Button>
+                                      </TooltipTrigger>
+                                      <TooltipContent>Analyze with patterns</TooltipContent>
+                                    </Tooltip>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          onClick={() => handleViewTranscript(video.id)}
+                                          disabled={loadingTranscript === video.id}
+                                          className="h-6 w-6 p-0"
+                                        >
+                                          {loadingTranscript === video.id ? (
+                                            <RefreshCw className="h-3 w-3 animate-spin" />
+                                          ) : (
+                                            <FileText className={`h-3 w-3 ${activeTranscript?.video_id === video.id ? "text-blue-500" : ""}`} />
+                                          )}
+                                        </Button>
+                                      </TooltipTrigger>
+                                      <TooltipContent>
+                                        {activeTranscript?.video_id === video.id ? "Hide transcript" : "View transcript"}
+                                      </TooltipContent>
+                                    </Tooltip>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          onClick={() => handleCopy(video.id)}
+                                          className="h-6 w-6 p-0"
+                                        >
+                                          {copiedVideoId === video.id ? (
+                                            <Check className="h-3 w-3 text-green-600" />
+                                          ) : (
+                                            <Copy className="h-3 w-3" />
+                                          )}
+                                        </Button>
+                                      </TooltipTrigger>
+                                      <TooltipContent>Copy transcript</TooltipContent>
+                                    </Tooltip>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <DropdownMenu>
+                                          <DropdownMenuTrigger asChild>
+                                            <Button size="sm" variant="ghost" className="h-6 w-6 p-0">
+                                              <Download className="h-3 w-3" />
+                                            </Button>
+                                          </DropdownMenuTrigger>
+                                          <DropdownMenuContent align="end">
+                                            <DropdownMenuItem onClick={() => handleExport(video.id, "txt")}>
+                                              Plain Text (.txt)
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => handleExport(video.id, "md")}>
+                                              Markdown (.md)
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => handleExport(video.id, "srt")}>
+                                              Subtitles (.srt)
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => handleExport(video.id, "json")}>
+                                              JSON (.json)
+                                            </DropdownMenuItem>
+                                          </DropdownMenuContent>
+                                        </DropdownMenu>
+                                      </TooltipTrigger>
+                                      <TooltipContent>Download</TooltipContent>
+                                    </Tooltip>
+                                  </>
+                                )}
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => handleRemoveVideo(video)}
+                                      className="shrink-0 h-6 w-6 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Remove video</TooltipContent>
+                                </Tooltip>
+                              </div>
+                            </TooltipProvider>
                           </div>
                         </li>
                       ))}
@@ -548,6 +579,24 @@ export default function Home() {
             </div>
 
             <div className="col-span-2 flex flex-col min-h-0 gap-4">
+              {selectedVideoForPattern && (
+                <PatternSelector
+                  videoId={selectedVideoForPattern}
+                  onPatternApplied={(result) => {
+                    setPatternResult(result)
+                    setSelectedVideoForPattern(null)
+                  }}
+                  onClose={() => setSelectedVideoForPattern(null)}
+                />
+              )}
+              {patternResult && (
+                <PatternResult
+                  patternName={patternResult.pattern_name}
+                  result={patternResult.result}
+                  modelUsed={patternResult.model_used}
+                  onClose={() => setPatternResult(null)}
+                />
+              )}
               {activeTranscript && (
                 <Card className="h-[40%] flex flex-col min-h-0">
                   <CardHeader className="pb-2 flex flex-row items-center justify-between">
@@ -556,26 +605,13 @@ export default function Home() {
                       <CardDescription className="truncate">{activeTranscript.video_title}</CardDescription>
                     </div>
                     <Button variant="ghost" size="sm" onClick={() => setActiveTranscript(null)} className="h-8 w-8 p-0 shrink-0">
-                      <X className="h-4 w-4" />
+                      <span className="text-lg">&times;</span>
                     </Button>
                   </CardHeader>
                   <CardContent className="flex-1 p-0 min-h-0">
                     <TranscriptViewer segments={activeTranscript.segments} hasTimestamps={activeTranscript.has_timestamps} />
                   </CardContent>
                 </Card>
-              )}
-              {videos.filter(v => videoAnalyses[v.id]).length > 0 && (
-                <div className="space-y-0 max-h-[40%] overflow-y-auto">
-                  {videos.filter(v => videoAnalyses[v.id]).map(video => (
-                    <AnalysisCard
-                      key={video.id}
-                      analysis={videoAnalyses[video.id]}
-                      videoTitle={video.title}
-                      onRegenerate={() => handleAnalyze(video.id, true)}
-                      isRegenerating={analyzingVideo === video.id}
-                    />
-                  ))}
-                </div>
               )}
               <Card className="flex-1 flex flex-col min-h-0">
                 <CardHeader className="pb-3">
@@ -602,14 +638,20 @@ export default function Home() {
                                   : "bg-muted"
                               }`}
                             >
-                              <pre className="whitespace-pre-wrap font-sans">{message.content}</pre>
+                              {message.role === "user" ? (
+                                <pre className="whitespace-pre-wrap font-sans">{message.content}</pre>
+                              ) : (
+                                <div className="prose prose-sm max-w-none dark:prose-invert">
+                                  <ReactMarkdown>{message.content}</ReactMarkdown>
+                                </div>
+                              )}
                             </div>
                           </div>
                         ))}
-                        {sendingMessage && (
+                        {sendingMessage && messages[messages.length - 1]?.content === "" && (
                           <div className="flex justify-start">
-                            <div className="bg-muted rounded-lg px-3 py-2 text-sm text-muted-foreground">
-                              Thinking...
+                            <div className="bg-muted rounded-lg px-3 py-2 text-sm text-muted-foreground animate-pulse">
+                              Generating...
                             </div>
                           </div>
                         )}
@@ -638,6 +680,23 @@ export default function Home() {
           </div>
         </div>
       </div>
+
+      <AlertDialog open={videoToDelete !== null} onOpenChange={(open) => !open && setVideoToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove video?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will remove &quot;{videoToDelete?.title}&quot; from this session. The video data will remain cached in the database for future use.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmRemoveVideo} className="bg-red-600 hover:bg-red-700">
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

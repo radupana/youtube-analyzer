@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
-from app.db.models import Chunk, Message, Session, SessionVideo, Video, VideoAnalysis
+from app.db.models import Chunk, Message, PatternResult, Session, SessionVideo, Video
 
 
 class TestSessionModel:
@@ -366,8 +366,8 @@ class TestMultipleRecords:
         assert len(result) == 3
 
 
-class TestVideoAnalysisModel:
-    def test_create_video_analysis(self, db_session):
+class TestPatternResultModel:
+    def test_create_pattern_result(self, db_session):
         video = Video(
             id="test123",
             title="Test Video",
@@ -380,25 +380,23 @@ class TestVideoAnalysisModel:
         db_session.add(video)
         db_session.commit()
 
-        analysis = VideoAnalysis(
+        result = PatternResult(
             video_id="test123",
-            summary="This is a test summary.",
-            key_takeaways='["Point 1", "Point 2"]',
-            main_topics='["Topic A"]',
-            notable_quotes='["Quote 1"]',
-            model_used="gemini/gemini-2.5-flash",
+            pattern_id="extract_wisdom",
+            result="# Summary\n\nThis is a test.",
+            model_used="gemini/gemini-2.0-flash",
         )
-        db_session.add(analysis)
+        db_session.add(result)
         db_session.commit()
-        db_session.refresh(analysis)
+        db_session.refresh(result)
 
-        assert analysis.id is not None
-        assert analysis.video_id == "test123"
-        assert analysis.summary == "This is a test summary."
-        assert analysis.model_used == "gemini/gemini-2.5-flash"
-        assert analysis.created_at is not None
+        assert result.id is not None
+        assert result.video_id == "test123"
+        assert result.pattern_id == "extract_wisdom"
+        assert result.model_used == "gemini/gemini-2.0-flash"
+        assert result.created_at is not None
 
-    def test_video_analysis_unique_constraint(self, db_session):
+    def test_pattern_result_unique_constraint(self, db_session):
         video = Video(
             id="test456",
             title="Test Video",
@@ -410,26 +408,85 @@ class TestVideoAnalysisModel:
         db_session.add(video)
         db_session.commit()
 
-        analysis1 = VideoAnalysis(
+        result1 = PatternResult(
             video_id="test456",
-            summary="First",
-            key_takeaways="[]",
-            main_topics="[]",
-            notable_quotes="[]",
+            pattern_id="summarize",
+            result="First result",
             model_used="test",
         )
-        db_session.add(analysis1)
+        db_session.add(result1)
         db_session.commit()
 
-        analysis2 = VideoAnalysis(
+        result2 = PatternResult(
             video_id="test456",
-            summary="Second",
-            key_takeaways="[]",
-            main_topics="[]",
-            notable_quotes="[]",
+            pattern_id="summarize",
+            result="Second result",
             model_used="test",
         )
-        db_session.add(analysis2)
+        db_session.add(result2)
 
         with pytest.raises(IntegrityError):
             db_session.commit()
+
+    def test_different_patterns_same_video_allowed(self, db_session):
+        video = Video(
+            id="test789",
+            title="Test Video",
+            channel_id="ch123",
+            channel_title="Test Channel",
+            duration="PT10M",
+            published_at=datetime.now(),
+        )
+        db_session.add(video)
+        db_session.commit()
+
+        result1 = PatternResult(
+            video_id="test789",
+            pattern_id="summarize",
+            result="Summary",
+            model_used="test",
+        )
+        result2 = PatternResult(
+            video_id="test789",
+            pattern_id="extract_wisdom",
+            result="Wisdom",
+            model_used="test",
+        )
+        db_session.add(result1)
+        db_session.add(result2)
+        db_session.commit()
+
+        results = db_session.exec(
+            select(PatternResult).where(PatternResult.video_id == "test789")
+        ).all()
+        assert len(results) == 2
+
+    def test_delete_video_cascades_to_pattern_results(self, db_session):
+        video = Video(
+            id="cascade_test",
+            title="Test Video",
+            channel_id="ch123",
+            channel_title="Test Channel",
+            duration="PT10M",
+            published_at=datetime.now(),
+        )
+        db_session.add(video)
+        db_session.commit()
+
+        result = PatternResult(
+            video_id="cascade_test",
+            pattern_id="summarize",
+            result="Test",
+            model_used="test",
+        )
+        db_session.add(result)
+        db_session.commit()
+
+        results = db_session.exec(select(PatternResult)).all()
+        assert len(results) == 1
+
+        db_session.delete(video)
+        db_session.commit()
+
+        results = db_session.exec(select(PatternResult)).all()
+        assert len(results) == 0

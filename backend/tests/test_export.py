@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.db.database import get_session
-from app.db.models import Chunk, Video, VideoAnalysis
+from app.db.models import Chunk, PatternResult, Video
 from app.main import app
 from app.services.export import (
     export_json,
@@ -126,22 +126,21 @@ class TestExportJson:
         assert result["segments"][0]["start"] == 0.0
         assert result["segments"][0]["text"] == "Hello world."
 
-    def test_with_analysis(self, sample_video: Video):
-        analysis = VideoAnalysis(
-            video_id="test123",
-            summary="Test summary about the video.",
-            key_takeaways='["Takeaway 1", "Takeaway 2"]',
-            main_topics='["Topic A", "Topic B"]',
-            notable_quotes='["Quote 1"]',
-            model_used="gemini/gemini-2.5-flash",
-        )
-        result = export_json(sample_video, analysis=analysis)
-        assert "analysis" in result
-        assert result["analysis"]["summary"] == "Test summary about the video."
-        assert result["analysis"]["key_takeaways"] == ["Takeaway 1", "Takeaway 2"]
-        assert result["analysis"]["main_topics"] == ["Topic A", "Topic B"]
-        assert result["analysis"]["notable_quotes"] == ["Quote 1"]
-        assert result["analysis"]["model_used"] == "gemini/gemini-2.5-flash"
+    def test_with_pattern_results(self, sample_video: Video):
+        pattern_results = [
+            PatternResult(
+                video_id="test123",
+                pattern_id="summarize",
+                result="# Summary\n\nTest summary about the video.",
+                model_used="gemini/gemini-2.0-flash",
+            )
+        ]
+        result = export_json(sample_video, pattern_results=pattern_results)
+        assert "analyses" in result
+        assert len(result["analyses"]) == 1
+        assert result["analyses"][0]["pattern_id"] == "summarize"
+        assert "Test summary" in result["analyses"][0]["result"]
+        assert result["analyses"][0]["model_used"] == "gemini/gemini-2.0-flash"
 
 
 class TestExportEndpoint:
@@ -183,6 +182,7 @@ class TestExportEndpoint:
             assert "Title: Export Test Video" in response.text
         finally:
             app.dependency_overrides.clear()
+            engine.dispose()
 
     def test_export_markdown_format(self):
         engine = create_engine(
@@ -217,6 +217,7 @@ class TestExportEndpoint:
             assert "# Markdown Test Video" in response.text
         finally:
             app.dependency_overrides.clear()
+            engine.dispose()
 
     def test_export_json_format(self):
         engine = create_engine(
@@ -253,17 +254,18 @@ class TestExportEndpoint:
             assert data["title"] == "JSON Test Video"
         finally:
             app.dependency_overrides.clear()
+            engine.dispose()
 
-    def test_export_json_with_analysis(self):
+    def test_export_json_with_pattern_results(self):
         engine = create_engine(
-            "sqlite:///file:test_json_analysis?mode=memory&cache=shared&uri=true",
+            "sqlite:///file:test_json_patterns?mode=memory&cache=shared&uri=true",
             connect_args={"check_same_thread": False},
         )
         SQLModel.metadata.create_all(engine)
         with Session(engine) as session:
             video = Video(
-                id="jsonanalysistest",
-                title="JSON Analysis Test",
+                id="jsonpatternstest",
+                title="JSON Patterns Test",
                 channel_id="UC123",
                 channel_title="Test Channel",
                 description="",
@@ -273,15 +275,13 @@ class TestExportEndpoint:
                 transcript_source="youtube",
             )
             session.add(video)
-            analysis = VideoAnalysis(
-                video_id="jsonanalysistest",
-                summary="Test summary.",
-                key_takeaways='["Point 1"]',
-                main_topics='["Topic A"]',
-                notable_quotes='["Quote"]',
-                model_used="gemini/gemini-2.5-flash",
+            pattern_result = PatternResult(
+                video_id="jsonpatternstest",
+                pattern_id="summarize",
+                result="# Summary\n\nTest summary.",
+                model_used="gemini/gemini-2.0-flash",
             )
-            session.add(analysis)
+            session.add(pattern_result)
             session.commit()
 
         def override_session():
@@ -290,14 +290,15 @@ class TestExportEndpoint:
 
         app.dependency_overrides[get_session] = override_session
         try:
-            response = client.get("/api/v1/videos/jsonanalysistest/export?format=json")
+            response = client.get("/api/v1/videos/jsonpatternstest/export?format=json")
             assert response.status_code == 200
             data = response.json()
-            assert "analysis" in data
-            assert data["analysis"]["summary"] == "Test summary."
-            assert data["analysis"]["key_takeaways"] == ["Point 1"]
+            assert "analyses" in data
+            assert len(data["analyses"]) == 1
+            assert data["analyses"][0]["pattern_id"] == "summarize"
         finally:
             app.dependency_overrides.clear()
+            engine.dispose()
 
     def test_export_srt_no_chunks(self):
         engine = create_engine(
@@ -331,6 +332,7 @@ class TestExportEndpoint:
             assert "timestamp data" in response.json()["detail"]
         finally:
             app.dependency_overrides.clear()
+            engine.dispose()
 
     def test_export_srt_with_chunks(self):
         engine = create_engine(
@@ -387,6 +389,7 @@ class TestExportEndpoint:
             assert "00:00:00,000 --> 00:00:02,500" in response.text
         finally:
             app.dependency_overrides.clear()
+            engine.dispose()
 
     def test_export_no_transcript(self):
         engine = create_engine(
@@ -420,3 +423,4 @@ class TestExportEndpoint:
             assert "No transcript" in response.json()["detail"]
         finally:
             app.dependency_overrides.clear()
+            engine.dispose()

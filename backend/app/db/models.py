@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -54,6 +55,10 @@ class Video(SQLModel, table=True):
         back_populates="video",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
+    pattern_results: list["PatternResult"] = Relationship(
+        back_populates="video",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
 
 
 class Chunk(SQLModel, table=True):
@@ -84,16 +89,18 @@ class SessionVideo(SQLModel, table=True):
     video: Video = Relationship()
 
 
-class VideoAnalysis(SQLModel, table=True):
-    """Cached video analysis result."""
+class PatternResult(SQLModel, table=True):
+    """Cached pattern execution result."""
 
-    __tablename__ = "video_analysis"
+    __tablename__ = "pattern_result"
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    video_id: str = Field(foreign_key="video.id", index=True, unique=True)
-    summary: str
-    key_takeaways: str
-    main_topics: str
-    notable_quotes: str
+    video_id: str = Field(foreign_key="video.id", index=True)
+    pattern_id: str = Field(index=True)
+    result: str
     model_used: str
     created_at: datetime = Field(default_factory=utc_now)
+
+    video: Video = Relationship(back_populates="pattern_results")
+
+    __table_args__ = (UniqueConstraint("video_id", "pattern_id"),)

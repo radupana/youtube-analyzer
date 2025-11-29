@@ -1,0 +1,40 @@
+id: summarize
+name: "Summarize"
+description: "Concise summary with main points and conclusion"
+icon: "📝"
+category: "summary"
+
+inputs:
+  - transcript
+  - video_title
+  - channel
+
+system_prompt: |
+  You are an expert at creating clear, concise summaries.
+  Focus on the most important information and structure it logically.
+  Avoid unnecessary details while preserving key points.
+
+user_prompt: |
+  Create a concise summary of this video.
+
+  VIDEO: {video_title}
+  CHANNEL: {channel}
+
+  TRANSCRIPT:
+  ---
+  {transcript}
+  ---
+
+  Provide your summary in the following format:
+
+  ## TL;DR
+  A single paragraph (2-3 sentences) capturing the essence of the content.
+
+  ## Main Points
+  - 5-7 bullet points covering the key topics discussed
+  - Each point should be one clear sentence
+
+  ## Conclusion
+  What is the main takeaway or call-to-action from this content?
+
+output_format: markdown
