@@ -2,11 +2,9 @@
 
 import numpy as np
 
-from app.services.chunking import TranscriptChunk
 from app.services.embeddings import (
     EMBEDDING_DIMENSION,
     clear_model,
-    generate_chunk_embeddings,
     generate_embeddings,
     generate_query_embedding,
 )
@@ -41,46 +39,6 @@ class TestGenerateEmbeddings:
         sim_0_2 = np.dot(embeddings[0], embeddings[2])
 
         assert sim_0_1 > sim_0_2
-
-
-class TestGenerateChunkEmbeddings:
-    def test_empty_chunks_returns_empty_list(self):
-        result = generate_chunk_embeddings([])
-        assert result == []
-
-    def test_single_chunk_returns_tuple(self):
-        chunk = TranscriptChunk(
-            id="v1_0",
-            video_id="v1",
-            text="Test chunk text",
-            start_time=0.0,
-            end_time=5.0,
-            token_count=3,
-        )
-        result = generate_chunk_embeddings([chunk])
-
-        assert len(result) == 1
-        assert result[0][0] is chunk
-        assert result[0][1].shape == (EMBEDDING_DIMENSION,)
-
-    def test_multiple_chunks_preserves_order(self):
-        chunks = [
-            TranscriptChunk(
-                id=f"v1_{i}",
-                video_id="v1",
-                text=f"Chunk number {i}",
-                start_time=float(i * 10),
-                end_time=float((i + 1) * 10),
-                token_count=3,
-            )
-            for i in range(5)
-        ]
-        result = generate_chunk_embeddings(chunks)
-
-        assert len(result) == 5
-        for i, (chunk, embedding) in enumerate(result):
-            assert chunk.id == f"v1_{i}"
-            assert embedding.shape == (EMBEDDING_DIMENSION,)
 
 
 class TestGenerateQueryEmbedding:
