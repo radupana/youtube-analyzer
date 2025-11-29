@@ -147,8 +147,13 @@ def get_model_info() -> dict[str, Any]:
 def _transcribe_audio(audio_path: str) -> str | None:
     """Transcribe audio using Whisper."""
     try:
+        file_size = os.path.getsize(audio_path)
+        if file_size < 1000:
+            logger.error(f"Audio file too small ({file_size} bytes), likely corrupted")
+            return None
+
         model = _get_model()
-        logger.info(f"Transcribing audio: {audio_path}")
+        logger.info(f"Transcribing audio: {audio_path} ({file_size} bytes)")
 
         result = model.transcribe(
             audio_path,
@@ -182,32 +187,23 @@ def _download_with_ytdlp(video_id: str, temp_dir: str) -> str | None:
                 "preferredquality": "192",
             }
         ],
-        "user-agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
-        ),
-        "referer": "https://www.youtube.com/",
-        "extractor-args": "youtube:player_client=android,web_creator,ios",
-        "http_headers": {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5",
-            "Sec-Fetch-Mode": "navigate",
-        },
+        "extractor-args": "youtube:player_client=web",
         "geo_bypass": True,
         "nocheckcertificate": True,
+        "socket_timeout": 30,
+        "retries": 3,
     }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
         if os.path.exists(audio_path):
-            return audio_path
+            file_size = os.path.getsize(audio_path)
+            if file_size > 1000:
+                logger.info(f"Downloaded audio: {audio_path} ({file_size} bytes)")
+                return audio_path
+            else:
+                logger.warning(f"Downloaded file too small: {file_size} bytes")
     except Exception as e:
         logger.warning(f"yt-dlp failed: {e}")
     return None
