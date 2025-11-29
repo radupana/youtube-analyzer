@@ -240,6 +240,10 @@ frontend/out/
 frontend/node_modules/
 frontend/tsconfig.tsbuildinfo
 
+# Playwright
+frontend/playwright-report/
+frontend/test-results/
+
 # Backend
 backend/.venv/
 backend/__pycache__/

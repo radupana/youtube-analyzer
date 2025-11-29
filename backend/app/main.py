@@ -10,7 +10,6 @@ from app.api_v1.endpoints import (
     patterns,
     sessions,
     settings,
-    transcripts,
     videos,
 )
 from app.core.config import get_settings
@@ -57,11 +56,6 @@ app.add_middleware(
 
 app.include_router(
     videos.router, prefix=f"{app_settings.api_v1_str}/videos", tags=["videos"]
-)
-app.include_router(
-    transcripts.router,
-    prefix=f"{app_settings.api_v1_str}/transcripts",
-    tags=["transcripts"],
 )
 app.include_router(chat.router, prefix=f"{app_settings.api_v1_str}/chat", tags=["chat"])
 app.include_router(

@@ -171,43 +171,6 @@ def _prepare_chat_messages(
     return messages, system_prompt
 
 
-async def chat_with_context(
-    message: str, video_transcripts: list[dict[str, Any]]
-) -> str:
-    provider = get_current_provider()
-    if not provider:
-        raise HTTPException(
-            status_code=503,
-            detail="No LLM provider configured. Check config.yaml and API keys.",
-        )
-
-    messages, _ = _prepare_chat_messages(message, video_transcripts, provider.model)
-
-    try:
-        response = await litellm.acompletion(
-            model=provider.model,
-            messages=messages,
-            api_key=provider.api_key,
-        )
-        content = response.choices[0].message.content
-        return content if content else ""
-    except AuthenticationError as e:
-        raise HTTPException(
-            status_code=401,
-            detail=f"Invalid API key for {provider.name}",
-        ) from e
-    except NotFoundError as e:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Model '{provider.model}' not found. {e.message}",
-        ) from e
-    except APIError as e:
-        raise HTTPException(
-            status_code=502,
-            detail=f"{provider.name} error: {e.message}",
-        ) from e
-
-
 async def chat_with_context_stream(
     message: str, video_transcripts: list[dict[str, Any]]
 ) -> AsyncIterator[str]:
