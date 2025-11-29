@@ -76,17 +76,26 @@ class Chunk(SQLModel, table=True):
 
 
 class SessionVideo(SQLModel, table=True):
-    """Links sessions to videos (many-to-many)."""
+    """Links sessions to videos (many-to-many) with processing state."""
 
     __tablename__ = "session_video"
+    __table_args__ = (
+        UniqueConstraint("session_id", "video_id", name="uq_session_video"),
+    )
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     session_id: str = Field(foreign_key="session.id", index=True)
     video_id: str = Field(foreign_key="video.id", index=True)
     added_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+    status: str = Field(default="pending")
+    progress: float = Field(default=0.0)
+    progress_message: str | None = Field(default=None)
+    error_message: str | None = Field(default=None)
 
     session: Session = Relationship(back_populates="session_videos")
-    video: Video = Relationship()
+    video: Video | None = Relationship()
 
 
 class PatternResult(SQLModel, table=True):

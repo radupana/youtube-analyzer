@@ -251,3 +251,4 @@ backend/*.db
 backend/file:*
 file:*
 backend/.env
+backend/config.yaml

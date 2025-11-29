@@ -35,7 +35,9 @@ _model: Any = None
 _model_name: str | None = None
 _last_used: float = 0.0
 _lock = threading.Lock()
+_transcribe_lock = threading.Lock()  # Separate lock for serializing transcriptions
 _unload_timer: threading.Timer | None = None
+_current_video_id: str | None = None  # Track which video is currently being transcribed
 
 
 def _get_model() -> Any:
@@ -141,28 +143,68 @@ def get_model_info() -> dict[str, Any]:
             "model_name": _model_name,
             "last_used": _last_used if _last_used > 0 else None,
             "idle_seconds": int(time.time() - _last_used) if _last_used > 0 else None,
+            "transcribing": _current_video_id,
         }
 
 
-def _transcribe_audio(audio_path: str) -> str | None:
-    """Transcribe audio using Whisper."""
-    try:
-        model = _get_model()
-        logger.info(f"Transcribing audio: {audio_path}")
+def is_transcription_in_progress() -> bool:
+    """Check if a transcription is currently in progress."""
+    return _current_video_id is not None
 
-        result = model.transcribe(
-            audio_path,
-            language="en",
-            task="transcribe",
-            verbose=False,
-            fp16=False,
-        )
 
-        return result.get("text", "").strip()
+def get_current_transcription() -> str | None:
+    """Get the video ID currently being transcribed, if any."""
+    return _current_video_id
 
-    except Exception as e:
-        logger.error(f"Error transcribing audio: {e}")
+
+def _transcribe_audio(
+    audio_path: str,
+    video_id: str,
+    progress_callback: Callable[[str, str], None] | None = None,
+    duration_msg: str = "",
+) -> str | None:
+    """Transcribe audio using Whisper. Serialized to prevent concurrent access."""
+    global _current_video_id
+
+    file_size = os.path.getsize(audio_path)
+    if file_size < 1000:
+        logger.error(f"Audio file too small ({file_size} bytes), likely corrupted")
         return None
+
+    # Serialize transcription - Whisper model is NOT thread-safe
+    with _transcribe_lock:
+        try:
+            _current_video_id = video_id
+            logger.info(
+                f"Acquired transcribe lock for {video_id}, "
+                f"transcribing {audio_path} ({file_size} bytes)"
+            )
+
+            # Update progress now that we actually have the lock
+            if progress_callback:
+                progress_callback(
+                    "whisper_transcribing",
+                    f"Transcribing audio{duration_msg}...",
+                )
+
+            model = _get_model()
+
+            result = model.transcribe(
+                audio_path,
+                language="en",
+                task="transcribe",
+                verbose=False,
+                fp16=False,
+            )
+
+            return result.get("text", "").strip()
+
+        except Exception as e:
+            logger.error(f"Error transcribing audio for {video_id}: {e}")
+            return None
+        finally:
+            _current_video_id = None
+            logger.info(f"Released transcribe lock for {video_id}")
 
 
 def _download_with_ytdlp(video_id: str, temp_dir: str) -> str | None:
@@ -182,32 +224,23 @@ def _download_with_ytdlp(video_id: str, temp_dir: str) -> str | None:
                 "preferredquality": "192",
             }
         ],
-        "user-agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
-        ),
-        "referer": "https://www.youtube.com/",
-        "extractor-args": "youtube:player_client=android,web_creator,ios",
-        "http_headers": {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5",
-            "Sec-Fetch-Mode": "navigate",
-        },
+        "extractor-args": "youtube:player_client=web",
         "geo_bypass": True,
         "nocheckcertificate": True,
+        "socket_timeout": 30,
+        "retries": 3,
     }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
         if os.path.exists(audio_path):
-            return audio_path
+            file_size = os.path.getsize(audio_path)
+            if file_size > 1000:
+                logger.info(f"Downloaded audio: {audio_path} ({file_size} bytes)")
+                return audio_path
+            else:
+                logger.warning(f"Downloaded file too small: {file_size} bytes")
     except Exception as e:
         logger.warning(f"yt-dlp failed: {e}")
     return None
@@ -339,15 +372,24 @@ def get_whisper_transcript(
             except Exception:
                 pass
 
-            if progress_callback:
-                progress_callback(
-                    "whisper_transcribing",
-                    f"Transcribing audio{duration_msg}...",
+            # Check if another transcription is in progress and show waiting status
+            current = get_current_transcription()
+            if current and current != video_id:
+                if progress_callback:
+                    progress_callback(
+                        "whisper_waiting",
+                        "Waiting for another video to finish transcribing...",
+                    )
+                logger.info(
+                    f"Video {video_id} waiting for {current} to finish transcribing"
                 )
 
             config = get_whisper_config()
             logger.info(f"Transcribing with Whisper model {config.model}...")
-            transcript = _transcribe_audio(audio_path)
+            # Pass callback so status updates when lock is acquired
+            transcript = _transcribe_audio(
+                audio_path, video_id, progress_callback, duration_msg
+            )
 
             if transcript:
                 logger.info(f"Successfully transcribed {video_id} with Whisper")

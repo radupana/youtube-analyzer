@@ -2,17 +2,18 @@
 
 import asyncio
 import logging
-import time
+from datetime import timedelta
 from enum import Enum
-from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import JSONResponse, PlainTextResponse
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.api_v1.schemas import (
-    TaskResponse,
-    TaskStatus,
+    AddVideoResponse,
+    SessionScopedVideo,
+    SessionScopedVideoList,
     TranscriptResponse,
     TranscriptSegmentSchema,
     VideoCreate,
@@ -41,21 +42,40 @@ router = APIRouter()
 
 youtube_service = YouTubeService()
 
-task_progress: dict[str, dict] = {}
-
 UNSUPPORTED_URL_ERROR = (
     "Only single video URLs are supported. "
     "Please provide a URL in the format https://www.youtube.com/watch?v=..."
 )
 
+STALE_PROCESSING_TIMEOUT = timedelta(minutes=15)
 
-@router.post("/add", response_model=TaskResponse)
+
+def _update_session_video_progress(
+    session_video_id: str,
+    status: str,
+    progress: float,
+    message: str,
+    error: str | None = None,
+):
+    with Session(get_engine()) as db:
+        sv = db.get(SessionVideo, session_video_id)
+        if sv:
+            sv.status = status
+            sv.progress = progress
+            sv.progress_message = message
+            sv.updated_at = utc_now()
+            if error:
+                sv.error_message = error
+            db.add(sv)
+            db.commit()
+
+
+@router.post("/add", response_model=AddVideoResponse)
 async def add_video(
     video_request: VideoCreate,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_session),
 ):
-    """Add a single YouTube video to a session."""
     url = video_request.url
     session_id = video_request.session_id
 
@@ -73,204 +93,203 @@ async def add_video(
     if not video_id:
         raise HTTPException(status_code=400, detail=UNSUPPORTED_URL_ERROR)
 
-    task_id = str(uuid4())
+    existing_link = db.exec(
+        select(SessionVideo)
+        .where(SessionVideo.session_id == session_id)
+        .where(SessionVideo.video_id == video_id)
+    ).first()
 
-    task_progress[task_id] = {
-        "status": TaskStatus.PENDING,
-        "progress": 0.0,
-        "total": 1,
-        "processed": 0,
-        "message": "Starting...",
-        "videos_added": [],
-        "current_video": None,
-        "current_step": None,
-        "start_time": time.time(),
-        "elapsed_time": 0,
-        "session_id": session_id,
-    }
+    if existing_link:
+        if existing_link.status in ("pending", "processing"):
+            raise HTTPException(
+                status_code=409,
+                detail="Video is already being processed in this session",
+            )
+        if existing_link.status == "ready":
+            return AddVideoResponse(
+                video_id=video_id,
+                status="ready",
+                message="Video already added",
+            )
+        if existing_link.status == "error":
+            existing_link.status = "pending"
+            existing_link.progress = 0.0
+            existing_link.progress_message = "Retrying..."
+            existing_link.error_message = None
+            existing_link.updated_at = utc_now()
+            db.add(existing_link)
+            db.commit()
+            db.refresh(existing_link)
+            background_tasks.add_task(
+                process_video_for_session,
+                existing_link.id,
+                video_id,
+                session_id,
+            )
+            return AddVideoResponse(
+                video_id=video_id,
+                session_video_id=existing_link.id,
+                status="pending",
+            )
 
-    background_tasks.add_task(process_single_video, task_id, video_id, session_id)
-
-    return TaskResponse(
-        task_id=task_id,
-        status=TaskStatus.PENDING,
+    session_video = SessionVideo(
+        session_id=session_id,
+        video_id=video_id,
+        status="pending",
         progress=0.0,
+        progress_message="Queued...",
+    )
+
+    try:
+        db.add(session_video)
+        db.commit()
+        db.refresh(session_video)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Video is already being added to this session",
+        ) from None
+
+    background_tasks.add_task(
+        process_video_for_session,
+        session_video.id,
+        video_id,
+        session_id,
+    )
+
+    return AddVideoResponse(
+        video_id=video_id,
+        session_video_id=session_video.id,
+        status="pending",
     )
 
 
-@router.get("/task/{task_id}")
-async def get_task_status(task_id: str):
-    """Get the status of a video loading task."""
-    if task_id not in task_progress:
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    progress = task_progress[task_id]
-
-    if progress["status"] not in (TaskStatus.COMPLETED, TaskStatus.FAILED):
-        progress["elapsed_time"] = int(time.time() - progress["start_time"])
-
-    return progress
-
-
-async def process_single_video(task_id: str, video_id: str, session_id: str):
-    """Process a single YouTube video and save to session."""
+async def process_video_for_session(
+    session_video_id: str,
+    video_id: str,
+    session_id: str,
+):
     try:
-        task_progress[task_id]["status"] = TaskStatus.RUNNING
-        task_progress[task_id]["message"] = "Loading video..."
-        task_progress[task_id]["progress"] = 10.0
+        _update_session_video_progress(
+            session_video_id, "processing", 10.0, "Loading video..."
+        )
 
         with Session(get_engine()) as db:
             existing_video = db.get(Video, video_id)
-            if existing_video:
-                cached_title = existing_video.title
-                cached_transcript = existing_video.transcript
 
-        if existing_video:
-            task_progress[task_id]["current_step"] = "cache"
-            task_progress[task_id]["message"] = "Loading from database..."
-            task_progress[task_id]["progress"] = 50.0
-            task_progress[task_id]["videos_added"].append(video_id)
-            task_progress[task_id]["current_video"] = (
-                cached_title[:50] + "..." if len(cached_title) > 50 else cached_title
+        if existing_video and existing_video.transcript:
+            _update_session_video_progress(
+                session_video_id, "processing", 50.0, "Loading from cache..."
             )
 
-            if cached_transcript:
-                task_progress[task_id]["current_step"] = "rag"
-                task_progress[task_id]["message"] = "Processing for search..."
-                task_progress[task_id]["progress"] = 75.0
-                await asyncio.to_thread(
-                    process_transcript_for_rag, video_id, cached_transcript
-                )
+            _update_session_video_progress(
+                session_video_id, "processing", 75.0, "Processing for search..."
+            )
+            await asyncio.to_thread(
+                process_transcript_for_rag, video_id, existing_video.transcript
+            )
 
-            await _link_video_to_session(session_id, video_id)
-
-            task_progress[task_id]["status"] = TaskStatus.COMPLETED
-            task_progress[task_id]["progress"] = 100.0
-            task_progress[task_id]["message"] = f"Loaded from database: {cached_title}"
-            task_progress[task_id]["processed"] = 1
+            _update_session_video_progress(session_video_id, "ready", 100.0, "Ready")
             return
 
-        task_progress[task_id]["current_step"] = "metadata"
-        task_progress[task_id]["message"] = "Fetching video metadata..."
-        task_progress[task_id]["progress"] = 20.0
-
-        video_info = await asyncio.to_thread(youtube_service.get_video_info, video_id)
-        if not video_info:
-            task_progress[task_id]["status"] = TaskStatus.FAILED
-            task_progress[task_id]["message"] = "Video not found or unavailable."
-            return
-
-        task_progress[task_id]["current_video"] = (
-            video_info["title"][:50] + "..."
-            if len(video_info["title"]) > 50
-            else video_info["title"]
+        _update_session_video_progress(
+            session_video_id, "processing", 20.0, "Fetching metadata..."
         )
-        task_progress[task_id]["progress"] = 30.0
-        task_progress[task_id]["videos_added"].append(video_id)
+        video_info = await asyncio.to_thread(youtube_service.get_video_info, video_id)
 
-        task_progress[task_id]["current_step"] = "transcript"
-        task_progress[task_id]["message"] = "Fetching transcript..."
-        task_progress[task_id]["progress"] = 40.0
+        if not video_info:
+            _update_session_video_progress(
+                session_video_id,
+                "error",
+                0.0,
+                "Video not found",
+                error="Video not found or unavailable",
+            )
+            return
+
+        # Save Video record early so title is available during processing
+        with Session(get_engine()) as db:
+            existing = db.get(Video, video_id)
+            if not existing:
+                db_video = Video(
+                    id=video_id,
+                    title=video_info["title"],
+                    channel_id=video_info["channel_id"],
+                    channel_title=video_info["channel_title"],
+                    description=video_info.get("description", ""),
+                    duration=video_info["duration"],
+                    published_at=video_info["published_at"],
+                    view_count=video_info.get("view_count", 0),
+                    like_count=video_info.get("like_count", 0),
+                    transcript=None,
+                    transcript_source=None,
+                )
+                try:
+                    db.add(db_video)
+                    db.commit()
+                except IntegrityError:
+                    db.rollback()  # Video already exists from concurrent request
+
+        _update_session_video_progress(
+            session_video_id, "processing", 40.0, "Fetching transcript..."
+        )
 
         def whisper_progress(step: str, message: str):
-            task_progress[task_id]["current_step"] = step
-            task_progress[task_id]["message"] = message
-            task_progress[task_id]["elapsed_time"] = int(
-                time.time() - task_progress[task_id]["start_time"]
+            progress_map = {
+                "whisper_downloading": 50.0,
+                "whisper_loading": 60.0,
+                "whisper_transcribing": 70.0,
+            }
+            _update_session_video_progress(
+                session_video_id,
+                "processing",
+                progress_map.get(step, 45.0),
+                message,
             )
-            if step == "whisper_downloading":
-                task_progress[task_id]["progress"] = 50.0
-            elif step == "whisper_loading":
-                task_progress[task_id]["progress"] = 60.0
-            elif step == "whisper_transcribing":
-                task_progress[task_id]["progress"] = 70.0
 
         transcript, source, segments = await asyncio.to_thread(
             youtube_service.get_transcript, video_id, None, whisper_progress
         )
 
-        db_video = Video(
-            id=video_id,
-            title=video_info["title"],
-            channel_id=video_info["channel_id"],
-            channel_title=video_info["channel_title"],
-            description=video_info.get("description", ""),
-            duration=video_info["duration"],
-            published_at=video_info["published_at"],
-            view_count=video_info.get("view_count", 0),
-            like_count=video_info.get("like_count", 0),
-            transcript=transcript,
-            transcript_source=source if transcript else "none",
-        )
-
+        # Update transcript in existing Video record (created earlier with metadata)
         with Session(get_engine()) as db:
-            db.add(db_video)
-            db.commit()
+            existing = db.get(Video, video_id)
+            if existing and transcript and not existing.transcript:
+                existing.transcript = transcript
+                existing.transcript_source = source
+                db.add(existing)
+                db.commit()
 
         if transcript:
-            task_progress[task_id]["progress"] = 85.0
-            if source == "whisper":
-                task_progress[task_id]["message"] = "Transcribed with Whisper"
-            else:
-                task_progress[task_id]["message"] = "Got YouTube captions"
-
-            task_progress[task_id]["current_step"] = "rag"
-            task_progress[task_id]["message"] = "Processing for search..."
-            task_progress[task_id]["progress"] = 90.0
+            _update_session_video_progress(
+                session_video_id, "processing", 85.0, "Processing for search..."
+            )
             await asyncio.to_thread(
                 process_transcript_for_rag, video_id, transcript, segments
             )
+            _update_session_video_progress(session_video_id, "ready", 100.0, "Ready")
         else:
-            logger.warning(f"No transcript available for {video_info['title']}")
-
-        await _link_video_to_session(session_id, video_id)
-
-        task_progress[task_id]["status"] = TaskStatus.COMPLETED
-        task_progress[task_id]["progress"] = 100.0
-        task_progress[task_id]["processed"] = 1
-        task_progress[task_id]["elapsed_time"] = int(
-            time.time() - task_progress[task_id]["start_time"]
-        )
-
-        if transcript:
-            task_progress[task_id]["message"] = f"Loaded: {video_info['title']}"
-        else:
-            msg = f"Loaded (no transcript): {video_info['title']}"
-            task_progress[task_id]["message"] = msg
+            _update_session_video_progress(
+                session_video_id,
+                "error",
+                100.0,
+                "No transcript available",
+                error="No captions or Whisper transcription available",
+            )
 
     except Exception as e:
-        task_progress[task_id]["status"] = TaskStatus.FAILED
-        task_progress[task_id]["message"] = f"Error: {e!s}"
-        logger.error(f"Error processing video: {e}")
-
-
-async def _link_video_to_session(session_id: str, video_id: str):
-    """Link a video to a session (create SessionVideo if not exists)."""
-    with Session(get_engine()) as db:
-        session = db.get(DBSession, session_id)
-        if not session:
-            return
-
-        existing = db.exec(
-            select(SessionVideo)
-            .where(SessionVideo.session_id == session_id)
-            .where(SessionVideo.video_id == video_id)
-        ).first()
-
-        if not existing:
-            session_video = SessionVideo(
-                session_id=session_id,
-                video_id=video_id,
-            )
-            db.add(session_video)
-
-        session.updated_at = utc_now()
-        db.add(session)
-        db.commit()
+        logger.exception("Error processing video")
+        _update_session_video_progress(
+            session_video_id,
+            "error",
+            0.0,
+            f"Error: {e!s}",
+            error=str(e),
+        )
 
 
 def _video_to_schema(video: Video) -> VideoSchema:
-    """Convert database Video to API schema."""
     return VideoSchema(
         id=video.id,
         title=video.title,
@@ -287,12 +306,11 @@ def _video_to_schema(video: Video) -> VideoSchema:
     )
 
 
-@router.get("/session/{session_id}", response_model=VideoList)
+@router.get("/session/{session_id}", response_model=SessionScopedVideoList)
 async def list_session_videos(
     session_id: str,
     db: Session = Depends(get_session),
 ):
-    """List all videos in a session."""
     session = db.get(DBSession, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -301,13 +319,63 @@ async def list_session_videos(
         select(SessionVideo).where(SessionVideo.session_id == session_id)
     ).all()
 
+    now = utc_now()
     videos = []
+    stale_updated = False
+
     for sv in session_videos:
+        if sv.status == "processing":
+            updated_at = sv.updated_at
+            if updated_at.tzinfo is None:
+                from datetime import UTC
+
+                updated_at = updated_at.replace(tzinfo=UTC)
+            elapsed = now - updated_at
+            if elapsed > STALE_PROCESSING_TIMEOUT:
+                sv.status = "error"
+                sv.error_message = "Processing timed out - please retry"
+                sv.progress_message = "Timed out"
+                db.add(sv)
+                stale_updated = True
+
         video = db.get(Video, sv.video_id)
         if video:
-            videos.append(_video_to_schema(video))
+            videos.append(
+                SessionScopedVideo(
+                    id=video.id,
+                    title=video.title,
+                    channel_id=video.channel_id,
+                    channel_title=video.channel_title,
+                    duration=video.duration,
+                    published_at=video.published_at,
+                    transcript_source=video.transcript_source,
+                    status=sv.status,
+                    progress=sv.progress,
+                    progress_message=sv.progress_message,
+                    error_message=sv.error_message,
+                )
+            )
+        else:
+            videos.append(
+                SessionScopedVideo(
+                    id=sv.video_id,
+                    title=f"Loading... ({sv.video_id})",
+                    channel_id="",
+                    channel_title="",
+                    duration="",
+                    published_at=now,
+                    transcript_source=None,
+                    status=sv.status,
+                    progress=sv.progress,
+                    progress_message=sv.progress_message,
+                    error_message=sv.error_message,
+                )
+            )
 
-    return VideoList(videos=videos, total=len(videos))
+    if stale_updated:
+        db.commit()
+
+    return SessionScopedVideoList(videos=videos, total=len(videos))
 
 
 @router.delete("/session/{session_id}/video/{video_id}")
@@ -316,7 +384,6 @@ async def remove_video_from_session(
     video_id: str,
     db: Session = Depends(get_session),
 ):
-    """Remove a video from a session."""
     session_video = db.exec(
         select(SessionVideo)
         .where(SessionVideo.session_id == session_id)
@@ -334,7 +401,6 @@ async def remove_video_from_session(
 
 @router.get("", response_model=VideoList)
 async def list_videos(db: Session = Depends(get_session)):
-    """List all videos in database."""
     videos = db.exec(select(Video)).all()
     return VideoList(
         videos=[_video_to_schema(v) for v in videos],
@@ -348,7 +414,6 @@ async def export_transcript(
     format: ExportFormat = ExportFormat.TXT,
     db: Session = Depends(get_session),
 ):
-    """Export video transcript in various formats."""
     video = db.get(Video, video_id)
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
@@ -398,7 +463,6 @@ async def export_transcript(
             media_type="text/srt; charset=utf-8",
         )
 
-    # JSON format - include chunks and pattern results if available
     if format == ExportFormat.JSON:
         chunks = db.exec(
             select(Chunk).where(Chunk.video_id == video_id).order_by(Chunk.start_time)  # type: ignore[arg-type]
@@ -419,7 +483,6 @@ async def export_transcript(
 
 @router.get("/{video_id}/transcript", response_model=TranscriptResponse)
 async def get_transcript(video_id: str, db: Session = Depends(get_session)):
-    """Get video transcript with timestamps for display/search."""
     video = db.get(Video, video_id)
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
@@ -456,7 +519,6 @@ async def get_transcript(video_id: str, db: Session = Depends(get_session)):
 
 @router.get("/{video_id}", response_model=VideoSchema)
 async def get_video(video_id: str, db: Session = Depends(get_session)):
-    """Get a specific video by ID."""
     video = db.get(Video, video_id)
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
@@ -465,7 +527,6 @@ async def get_video(video_id: str, db: Session = Depends(get_session)):
 
 @router.delete("/{video_id}")
 async def delete_video(video_id: str, db: Session = Depends(get_session)):
-    """Delete a video and its chunks from database."""
     video = db.get(Video, video_id)
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
@@ -483,8 +544,6 @@ async def delete_video(video_id: str, db: Session = Depends(get_session)):
 
 @router.delete("/cache/clear")
 async def clear_cache(db: Session = Depends(get_session)):
-    """Clear all videos and chunks from database."""
-    task_progress.clear()
     clear_model()
 
     chunks = db.exec(select(Chunk)).all()
