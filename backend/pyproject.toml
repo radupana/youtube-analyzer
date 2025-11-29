@@ -28,4 +28,5 @@ no_implicit_optional = true
 # Ignore missing stubs for third-party libraries
 ignore_missing_imports = true
 # Disable strict checks that produce false positives with untyped libraries
-disable_error_code = ["attr-defined", "union-attr", "call-arg"]
+# no-redef and assignment are for optional imports (torch, whisper) that may or may not exist
+disable_error_code = ["attr-defined", "union-attr", "call-arg", "no-redef", "assignment"]

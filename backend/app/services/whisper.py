@@ -17,7 +17,6 @@ try:
 except ImportError:
     whisper = None
 
-torch: Any
 try:
     import torch
 except ImportError:
