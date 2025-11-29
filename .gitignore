@@ -216,7 +216,6 @@ __marimo__/
 # Project documentation (private)
 *.md
 !README.md
-!CLAUDE.md
 !.github/copilot-instructions.md
 
 # Project specific
