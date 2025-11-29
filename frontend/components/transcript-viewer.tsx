@@ -40,7 +40,10 @@ export function TranscriptViewer({ segments, hasTimestamps }: TranscriptViewerPr
   const matchRefs = useRef<Map<number, HTMLElement>>(new Map())
 
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedQuery(query.slice(0, 200)), 300)
+    const timer = setTimeout(() => {
+      setDebouncedQuery(query.slice(0, 200))
+      setCurrentMatchIndex(0) // Reset to first match when search changes
+    }, 300)
     return () => clearTimeout(timer)
   }, [query])
 
@@ -67,10 +70,6 @@ export function TranscriptViewer({ segments, hasTimestamps }: TranscriptViewerPr
 
     return results
   }, [debouncedQuery, segments])
-
-  useEffect(() => {
-    setCurrentMatchIndex(0)
-  }, [debouncedQuery])
 
   useEffect(() => {
     if (matches.length === 0) return
