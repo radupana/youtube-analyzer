@@ -16,6 +16,7 @@ def db_session() -> Generator[Session]:
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
         yield session
+    engine.dispose()
 
 
 @pytest.fixture

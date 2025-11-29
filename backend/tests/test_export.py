@@ -182,6 +182,7 @@ class TestExportEndpoint:
             assert "Title: Export Test Video" in response.text
         finally:
             app.dependency_overrides.clear()
+            engine.dispose()
 
     def test_export_markdown_format(self):
         engine = create_engine(
@@ -216,6 +217,7 @@ class TestExportEndpoint:
             assert "# Markdown Test Video" in response.text
         finally:
             app.dependency_overrides.clear()
+            engine.dispose()
 
     def test_export_json_format(self):
         engine = create_engine(
@@ -252,6 +254,7 @@ class TestExportEndpoint:
             assert data["title"] == "JSON Test Video"
         finally:
             app.dependency_overrides.clear()
+            engine.dispose()
 
     def test_export_json_with_pattern_results(self):
         engine = create_engine(
@@ -295,6 +298,7 @@ class TestExportEndpoint:
             assert data["analyses"][0]["pattern_id"] == "summarize"
         finally:
             app.dependency_overrides.clear()
+            engine.dispose()
 
     def test_export_srt_no_chunks(self):
         engine = create_engine(
@@ -328,6 +332,7 @@ class TestExportEndpoint:
             assert "timestamp data" in response.json()["detail"]
         finally:
             app.dependency_overrides.clear()
+            engine.dispose()
 
     def test_export_srt_with_chunks(self):
         engine = create_engine(
@@ -384,6 +389,7 @@ class TestExportEndpoint:
             assert "00:00:00,000 --> 00:00:02,500" in response.text
         finally:
             app.dependency_overrides.clear()
+            engine.dispose()
 
     def test_export_no_transcript(self):
         engine = create_engine(
@@ -417,3 +423,4 @@ class TestExportEndpoint:
             assert "No transcript" in response.json()["detail"]
         finally:
             app.dependency_overrides.clear()
+            engine.dispose()

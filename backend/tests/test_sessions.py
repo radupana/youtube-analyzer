@@ -28,6 +28,7 @@ def test_client():
     yield client, engine
     app.dependency_overrides.clear()
     SQLModel.metadata.drop_all(engine)
+    engine.dispose()
 
 
 class TestListSessions:

@@ -33,6 +33,7 @@ def test_client(tmp_path):
     yield client, engine
     app.dependency_overrides.clear()
     SQLModel.metadata.drop_all(engine)
+    engine.dispose()
 
 
 def create_video_with_transcript(engine) -> Video:
