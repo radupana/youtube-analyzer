@@ -225,8 +225,11 @@ async def process_video_for_session(
                     transcript=None,
                     transcript_source=None,
                 )
-                db.add(db_video)
-                db.commit()
+                try:
+                    db.add(db_video)
+                    db.commit()
+                except IntegrityError:
+                    db.rollback()  # Video already exists from concurrent request
 
         _update_session_video_progress(
             session_video_id, "processing", 40.0, "Fetching transcript..."
