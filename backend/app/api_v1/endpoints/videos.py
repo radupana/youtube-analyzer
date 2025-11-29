@@ -1,6 +1,7 @@
 """Video management endpoints with session persistence."""
 
 import asyncio
+import json
 import logging
 from datetime import timedelta
 from enum import Enum
@@ -8,7 +9,7 @@ from enum import Enum
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, select
+from sqlmodel import Session, col, delete, select
 
 from app.api_v1.schemas import (
     AddVideoResponse,
@@ -78,6 +79,8 @@ async def add_video(
 ):
     url = video_request.url
     session_id = video_request.session_id
+    preferred_languages = video_request.preferred_languages
+    prefer_manual = video_request.prefer_manual
 
     session = db.get(DBSession, session_id)
     if not session:
@@ -125,6 +128,8 @@ async def add_video(
                 existing_link.id,
                 video_id,
                 session_id,
+                preferred_languages,
+                prefer_manual,
             )
             return AddVideoResponse(
                 video_id=video_id,
@@ -156,6 +161,8 @@ async def add_video(
         session_video.id,
         video_id,
         session_id,
+        preferred_languages,
+        prefer_manual,
     )
 
     return AddVideoResponse(
@@ -169,6 +176,8 @@ async def process_video_for_session(
     session_video_id: str,
     video_id: str,
     session_id: str,
+    preferred_languages: list[str] | None = None,
+    prefer_manual: bool | None = None,
 ):
     try:
         _update_session_video_progress(
@@ -208,7 +217,6 @@ async def process_video_for_session(
             )
             return
 
-        # Save Video record early so title is available during processing
         with Session(get_engine()) as db:
             existing = db.get(Video, video_id)
             if not existing:
@@ -229,7 +237,7 @@ async def process_video_for_session(
                     db.add(db_video)
                     db.commit()
                 except IntegrityError:
-                    db.rollback()  # Video already exists from concurrent request
+                    db.rollback()
 
         _update_session_video_progress(
             session_video_id, "processing", 40.0, "Fetching transcript..."
@@ -248,25 +256,43 @@ async def process_video_for_session(
                 message,
             )
 
-        transcript, source, segments = await asyncio.to_thread(
-            youtube_service.get_transcript, video_id, None, whisper_progress
+        result = await asyncio.to_thread(
+            youtube_service.get_transcript,
+            video_id,
+            preferred_languages=preferred_languages,
+            prefer_manual=prefer_manual,
+            progress_callback=whisper_progress,
         )
 
-        # Update transcript in existing Video record (created earlier with metadata)
-        with Session(get_engine()) as db:
-            existing = db.get(Video, video_id)
-            if existing and transcript and not existing.transcript:
-                existing.transcript = transcript
-                existing.transcript_source = source
-                db.add(existing)
-                db.commit()
+        if result:
+            with Session(get_engine()) as db:
+                existing = db.get(Video, video_id)
+                if existing and not existing.transcript:
+                    existing.transcript = result.text
+                    existing.transcript_source = result.source
+                    existing.transcript_language = result.language
+                    existing.transcript_language_code = result.language_code
+                    existing.transcript_is_generated = result.is_generated
+                    if result.available_languages:
+                        existing.available_languages_json = json.dumps(
+                            [
+                                {
+                                    "code": lang.code,
+                                    "name": lang.name,
+                                    "is_generated": lang.is_generated,
+                                    "is_translatable": lang.is_translatable,
+                                }
+                                for lang in result.available_languages
+                            ]
+                        )
+                    db.add(existing)
+                    db.commit()
 
-        if transcript:
             _update_session_video_progress(
                 session_video_id, "processing", 85.0, "Processing for search..."
             )
             await asyncio.to_thread(
-                process_transcript_for_rag, video_id, transcript, segments
+                process_transcript_for_rag, video_id, result.text, result.segments
             )
             _update_session_video_progress(session_video_id, "ready", 100.0, "Ready")
         else:
@@ -300,6 +326,9 @@ def _video_to_schema(video: Video) -> VideoSchema:
         status=VideoStatus.READY if video.transcript else VideoStatus.ERROR,
         transcript=video.transcript,
         transcript_source=video.transcript_source,
+        transcript_language=video.transcript_language,
+        transcript_language_code=video.transcript_language_code,
+        transcript_is_generated=video.transcript_is_generated,
         description=video.description,
         view_count=video.view_count,
         like_count=video.like_count,
@@ -349,6 +378,9 @@ async def list_session_videos(
                     duration=video.duration,
                     published_at=video.published_at,
                     transcript_source=video.transcript_source,
+                    transcript_language=video.transcript_language,
+                    transcript_language_code=video.transcript_language_code,
+                    transcript_is_generated=video.transcript_is_generated,
                     status=sv.status,
                     progress=sv.progress,
                     progress_message=sv.progress_message,
@@ -384,6 +416,7 @@ async def remove_video_from_session(
     video_id: str,
     db: Session = Depends(get_session),
 ):
+    """Hard delete a video - removes from ALL sessions and deletes all data."""
     session_video = db.exec(
         select(SessionVideo)
         .where(SessionVideo.session_id == session_id)
@@ -393,10 +426,32 @@ async def remove_video_from_session(
     if not session_video:
         raise HTTPException(status_code=404, detail="Video not found in session")
 
-    db.delete(session_video)
+    video = db.get(Video, video_id)
+    if not video:
+        # Just clean up the orphaned session link
+        db.delete(session_video)
+        db.commit()
+        return {"success": True}
+
+    # Count how many sessions this video is in (for the response)
+    all_session_videos = db.exec(
+        select(SessionVideo).where(SessionVideo.video_id == video_id)
+    ).all()
+    sessions_affected = len(all_session_videos)
+
+    # Bulk delete all related data
+    db.exec(delete(SessionVideo).where(col(SessionVideo.video_id) == video_id))
+    db.exec(delete(Chunk).where(col(Chunk.video_id) == video_id))
+    db.exec(delete(PatternResult).where(col(PatternResult.video_id) == video_id))
+
+    # Delete the video itself
+    db.delete(video)
     db.commit()
 
-    return {"success": True}
+    return {
+        "success": True,
+        "sessions_affected": sessions_affected,
+    }
 
 
 @router.get("", response_model=VideoList)
@@ -527,14 +582,15 @@ async def get_video(video_id: str, db: Session = Depends(get_session)):
 
 @router.delete("/{video_id}")
 async def delete_video(video_id: str, db: Session = Depends(get_session)):
+    """Hard delete a video and all associated data."""
     video = db.get(Video, video_id)
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
 
-    for sv in db.exec(
-        select(SessionVideo).where(SessionVideo.video_id == video_id)
-    ).all():
-        db.delete(sv)
+    # Bulk delete all related data
+    db.exec(delete(SessionVideo).where(col(SessionVideo.video_id) == video_id))
+    db.exec(delete(Chunk).where(col(Chunk.video_id) == video_id))
+    db.exec(delete(PatternResult).where(col(PatternResult.video_id) == video_id))
 
     db.delete(video)
     db.commit()
@@ -546,15 +602,14 @@ async def delete_video(video_id: str, db: Session = Depends(get_session)):
 async def clear_cache(db: Session = Depends(get_session)):
     clear_model()
 
-    chunks = db.exec(select(Chunk)).all()
-    for chunk in chunks:
-        db.delete(chunk)
+    # Count videos before deletion
+    video_count = len(db.exec(select(Video)).all())
 
-    videos = db.exec(select(Video)).all()
-    video_count = len(videos)
-    for video in videos:
-        db.delete(video)
-
+    # Bulk delete all data
+    db.exec(delete(Chunk))
+    db.exec(delete(PatternResult))
+    db.exec(delete(SessionVideo))
+    db.exec(delete(Video))
     db.commit()
 
     return {

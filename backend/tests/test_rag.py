@@ -39,6 +39,7 @@ class TestProcessTranscriptForRag:
         result = process_transcript_for_rag("vid1", "   \n\t  ")
         assert result is False
 
+    @pytest.mark.requires_embeddings
     def test_simple_transcript_creates_chunks(self, test_db):
         transcript = "This is a test transcript with some content."
         result = process_transcript_for_rag("vid1", transcript)
@@ -46,6 +47,7 @@ class TestProcessTranscriptForRag:
         assert result is True
         assert has_rag_data("vid1")
 
+    @pytest.mark.requires_embeddings
     def test_transcript_with_segments(self, test_db):
         segments = [
             TranscriptSegment(text="First segment.", start=0.0, duration=5.0),
@@ -58,6 +60,7 @@ class TestProcessTranscriptForRag:
         assert result is True
         assert has_rag_data("vid2")
 
+    @pytest.mark.requires_embeddings
     def test_already_exists_returns_true(self, test_db):
         transcript = "Some content here."
         process_transcript_for_rag("vid3", transcript)
@@ -66,6 +69,7 @@ class TestProcessTranscriptForRag:
 
         assert result is True
 
+    @pytest.mark.requires_embeddings
     def test_long_transcript_creates_multiple_chunks(self, test_db):
         transcript = "word " * 1000
         result = process_transcript_for_rag(
@@ -85,6 +89,7 @@ class TestRetrieveContextForQuery:
         result = retrieve_context_for_query("query", ["nonexistent"])
         assert result == ""
 
+    @pytest.mark.requires_embeddings
     def test_retrieves_relevant_content(self, test_db):
         transcript = (
             "Machine learning is a subset of artificial intelligence. "
@@ -100,6 +105,7 @@ class TestRetrieveContextForQuery:
         assert len(result) > 0
         assert "machine learning" in result.lower() or "neural" in result.lower()
 
+    @pytest.mark.requires_embeddings
     def test_retrieves_from_multiple_videos(self, test_db):
         process_transcript_for_rag(
             "vid1", "Python programming language basics.", chunk_size=50
@@ -110,6 +116,7 @@ class TestRetrieveContextForQuery:
 
         assert len(result) > 0
 
+    @pytest.mark.requires_embeddings
     def test_respects_max_tokens(self, test_db):
         transcript = "word " * 500
         process_transcript_for_rag("vid1", transcript, chunk_size=100)
@@ -128,6 +135,7 @@ class TestHasRagData:
     def test_returns_false_for_missing(self, test_db):
         assert has_rag_data("nonexistent") is False
 
+    @pytest.mark.requires_embeddings
     def test_returns_true_after_processing(self, test_db):
         process_transcript_for_rag("vid1", "Some transcript content.")
         assert has_rag_data("vid1") is True

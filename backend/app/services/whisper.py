@@ -162,8 +162,12 @@ def _transcribe_audio(
     video_id: str,
     progress_callback: Callable[[str, str], None] | None = None,
     duration_msg: str = "",
-) -> str | None:
-    """Transcribe audio using Whisper. Serialized to prevent concurrent access."""
+) -> tuple[str, str] | None:
+    """Transcribe audio using Whisper. Serialized to prevent concurrent access.
+
+    Returns:
+        Tuple of (transcript_text, language_code) or None if failed.
+    """
     global _current_video_id
 
     file_size = os.path.getsize(audio_path)
@@ -189,15 +193,20 @@ def _transcribe_audio(
 
             model = _get_model()
 
+            # Let Whisper auto-detect the language
             result = model.transcribe(
                 audio_path,
-                language="en",
                 task="transcribe",
                 verbose=False,
                 fp16=False,
             )
 
-            return result.get("text", "").strip()
+            text = result.get("text", "").strip()
+            detected_lang = result.get("language", "en")
+            logger.info(f"Whisper detected language: {detected_lang}")
+
+            # Return tuple of (text, language_code)
+            return (text, detected_lang) if text else None
 
         except Exception as e:
             logger.error(f"Error transcribing audio for {video_id}: {e}")
@@ -305,8 +314,13 @@ def _download_with_ytdlp_update(video_id: str, temp_dir: str) -> str | None:
 
 def get_whisper_transcript(
     video_id: str, progress_callback: Callable[[str, str], None] | None = None
-) -> str | None:
-    """Get transcript using Whisper (download audio + transcribe)."""
+) -> tuple[str, str] | None:
+    """Get transcript using Whisper (download audio + transcribe).
+
+    Returns:
+        Tuple of (transcript_text, language_code) or None if failed.
+        Language code is auto-detected by Whisper (e.g., 'en', 'de', 'fr').
+    """
     try:
         logger.info(f"Using Whisper fallback for video {video_id}")
 

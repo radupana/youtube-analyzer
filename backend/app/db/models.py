@@ -49,6 +49,10 @@ class Video(SQLModel, table=True):
     like_count: int = 0
     transcript: str | None = None
     transcript_source: str | None = None
+    transcript_language: str | None = None
+    transcript_language_code: str | None = None
+    transcript_is_generated: bool | None = None
+    available_languages_json: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
 
     chunks: list["Chunk"] = Relationship(

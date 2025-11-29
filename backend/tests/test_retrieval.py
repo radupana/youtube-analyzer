@@ -36,6 +36,7 @@ class TestRetrieveRelevantChunks:
         result = retrieve_relevant_chunks("query", [], embeddings)
         assert result == []
 
+    @pytest.mark.requires_embeddings
     def test_single_chunk_returns_that_chunk(self):
         chunk = make_chunk("v1", 0, "Machine learning is great")
         embeddings = generate_embeddings([chunk.text])
@@ -45,6 +46,7 @@ class TestRetrieveRelevantChunks:
         assert len(result) == 1
         assert result[0] is chunk
 
+    @pytest.mark.requires_embeddings
     def test_retrieves_most_relevant_chunks(self):
         chunks = [
             make_chunk("v1", 0, "Machine learning and artificial intelligence"),
@@ -65,6 +67,7 @@ class TestRetrieveRelevantChunks:
         assert "Deep neural networks and backpropagation" in result_texts
         assert "Supervised and unsupervised learning algorithms" in result_texts
 
+    @pytest.mark.requires_embeddings
     def test_top_k_limits_results(self):
         chunks = [make_chunk("v1", i, f"Chunk {i} text") for i in range(10)]
         embeddings = generate_embeddings([c.text for c in chunks])
@@ -73,6 +76,7 @@ class TestRetrieveRelevantChunks:
 
         assert len(result) == 3
 
+    @pytest.mark.requires_embeddings
     def test_top_k_larger_than_chunks_returns_all(self):
         chunks = [make_chunk("v1", i, f"Content {i}") for i in range(3)]
         embeddings = generate_embeddings([c.text for c in chunks])
@@ -81,6 +85,7 @@ class TestRetrieveRelevantChunks:
 
         assert len(result) == 3
 
+    @pytest.mark.requires_embeddings
     def test_mismatched_counts_raises_error(self):
         chunks = [make_chunk("v1", 0, "Test")]
         embeddings = generate_embeddings(["Text 1", "Text 2"])

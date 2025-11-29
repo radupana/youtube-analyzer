@@ -99,7 +99,11 @@ export function SessionSidebar({
     const session = sessions.find(s => s.id === sessionId)
     if (!session) return
 
-    if (!confirm(`Delete "${session.title}"? This will permanently remove all videos and chat history.`)) {
+    const videoWarning = session.video_count > 0
+      ? `\n\nWARNING: This will permanently delete ${session.video_count} video(s) and their transcripts. These videos will also be removed from ANY OTHER sessions they appear in.`
+      : ""
+
+    if (!confirm(`Delete "${session.title}"?\n\nThis will permanently remove all chat history.${videoWarning}\n\nThis action cannot be undone.`)) {
       return
     }
 

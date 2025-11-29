@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel import Session, func, select
+from sqlmodel import Session, col, delete, func, select
 
 from app.api_v1.schemas import (
     MessageResponse,
@@ -12,7 +12,7 @@ from app.api_v1.schemas import (
     SessionVideoResponse,
 )
 from app.db.database import get_session
-from app.db.models import Message, SessionVideo, Video, utc_now
+from app.db.models import Chunk, Message, PatternResult, SessionVideo, Video, utc_now
 from app.db.models import Session as DBSession
 
 router = APIRouter()
@@ -158,11 +158,42 @@ def update_session(
 
 @router.delete("/{session_id}")
 def delete_session(session_id: str, db: Session = Depends(get_session)):
+    """Delete a session and hard-delete ALL videos in it (from all sessions)."""
     session = db.get(DBSession, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    # Get all videos in this session
+    session_videos = db.exec(
+        select(SessionVideo).where(SessionVideo.session_id == session_id)
+    ).all()
+
+    video_ids = [sv.video_id for sv in session_videos]
+    videos_deleted = 0
+
+    # Hard delete each video (from ALL sessions, not just this one)
+    for video_id in video_ids:
+        video = db.get(Video, video_id)
+        if not video:
+            continue
+
+        # Bulk delete all related data
+        db.exec(delete(SessionVideo).where(col(SessionVideo.video_id) == video_id))
+        db.exec(delete(Chunk).where(col(Chunk.video_id) == video_id))
+        db.exec(delete(PatternResult).where(col(PatternResult.video_id) == video_id))
+
+        # Delete the video
+        db.delete(video)
+        videos_deleted += 1
+
+    # Bulk delete messages for this session
+    db.exec(delete(Message).where(col(Message.session_id) == session_id))
+
+    # Delete the session itself
     db.delete(session)
     db.commit()
 
-    return {"success": True}
+    return {
+        "success": True,
+        "videos_deleted": videos_deleted,
+    }

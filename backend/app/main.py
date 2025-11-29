@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api_v1.endpoints import (
     chat,
+    languages,
     patterns,
     sessions,
     settings,
@@ -66,6 +67,9 @@ app.include_router(
 )
 app.include_router(
     patterns.router, prefix=f"{app_settings.api_v1_str}/patterns", tags=["patterns"]
+)
+app.include_router(
+    languages.router, prefix=f"{app_settings.api_v1_str}/languages", tags=["languages"]
 )
 
 

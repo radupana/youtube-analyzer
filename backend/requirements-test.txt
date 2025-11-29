@@ -1,0 +1,36 @@
+# Test dependencies - enough to run tests with mocked ML services
+# Excludes: openai-whisper, sentence-transformers, torch (all mocked)
+
+# Web framework
+fastapi>=0.115.0
+uvicorn>=0.32.0
+pydantic>=2.10.0
+pydantic-settings>=2.6.0
+
+# YouTube & transcripts (no ML)
+google-api-python-client>=2.127.0
+youtube-transcript-api>=1.1.0
+yt-dlp
+
+# LLM (mocked in tests, but litellm is lightweight)
+litellm>=1.50.0
+
+# RAG dependencies (numpy/faiss are lightweight, no torch)
+numpy
+faiss-cpu>=1.8.0
+tiktoken>=0.7.0
+
+# Database
+sqlmodel>=0.0.22
+
+# Config
+pyyaml>=6.0
+
+# System monitoring
+psutil>=5.9.0
+
+# Testing
+pytest>=8.0.0
+pytest-asyncio>=0.24.0
+pytest-cov>=6.0.0
+httpx>=0.28.0

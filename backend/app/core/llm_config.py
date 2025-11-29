@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -28,16 +28,23 @@ class RagConfig:
     max_context_tokens: int = 4000
 
 
+@dataclass
+class TranscriptConfig:
+    preferred_languages: list[str] = field(default_factory=lambda: ["en"])
+    prefer_manual: bool = True
+
+
 _providers: dict[str, LLMProvider] = {}
 _current_provider_id: str | None = None
 _default_provider_id: str | None = None
 _whisper_config: WhisperConfig = WhisperConfig()
 _rag_config: RagConfig = RagConfig()
+_transcript_config: TranscriptConfig = TranscriptConfig()
 
 
 def load_config(config_path: str | Path = "config.yaml") -> None:
     global _providers, _current_provider_id, _default_provider_id
-    global _whisper_config, _rag_config
+    global _whisper_config, _rag_config, _transcript_config
 
     path = Path(config_path)
     if not path.exists():
@@ -88,6 +95,12 @@ def load_config(config_path: str | Path = "config.yaml") -> None:
         max_context_tokens=rag_cfg.get("max_context_tokens", 4000),
     )
 
+    transcript_cfg = config.get("transcripts", {})
+    _transcript_config = TranscriptConfig(
+        preferred_languages=transcript_cfg.get("preferred_languages", ["en"]),
+        prefer_manual=transcript_cfg.get("prefer_manual", True),
+    )
+
 
 def get_providers() -> list[LLMProvider]:
     return list(_providers.values())
@@ -117,3 +130,7 @@ def get_whisper_config() -> WhisperConfig:
 
 def get_rag_config() -> RagConfig:
     return _rag_config
+
+
+def get_transcript_config() -> TranscriptConfig:
+    return _transcript_config

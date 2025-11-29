@@ -26,6 +26,12 @@ class VideoCreate(BaseModel):
         description="YouTube video URL (e.g., https://youtube.com/watch?v=...)",
     )
     session_id: str = Field(..., description="Session ID to add video to")
+    preferred_languages: list[str] | None = Field(
+        None, description="Language codes in priority order (e.g., ['de', 'en'])"
+    )
+    prefer_manual: bool | None = Field(
+        None, description="Prefer manual transcripts over auto-generated"
+    )
 
 
 class Video(VideoBase):
@@ -34,6 +40,9 @@ class Video(VideoBase):
     transcript_source: str | None = Field(
         None, description="Source of transcript: 'youtube' or 'whisper'"
     )
+    transcript_language: str | None = None
+    transcript_language_code: str | None = None
+    transcript_is_generated: bool | None = None
     description: str | None = None
     view_count: int | None = None
     like_count: int | None = None
@@ -53,6 +62,9 @@ class SessionScopedVideo(BaseModel):
     duration: str
     published_at: datetime
     transcript_source: str | None = None
+    transcript_language: str | None = None
+    transcript_language_code: str | None = None
+    transcript_is_generated: bool | None = None
     status: str
     progress: float = 0.0
     progress_message: str | None = None
@@ -163,3 +175,22 @@ class PatternResultResponse(BaseModel):
     result: str
     model_used: str
     created_at: datetime
+
+
+class LanguageInfo(BaseModel):
+    code: str = Field(..., description="ISO 639-1 language code")
+    name: str = Field(..., description="Full language name")
+    is_generated: bool = Field(..., description="True if auto-generated")
+    is_translatable: bool = Field(..., description="True if can be translated")
+
+
+class AvailableTranscriptsResponse(BaseModel):
+    video_id: str
+    languages: list[LanguageInfo]
+    whisper_available: bool = True
+    cached: bool = False
+
+
+class TranscriptDefaultsResponse(BaseModel):
+    preferred_languages: list[str]
+    prefer_manual: bool

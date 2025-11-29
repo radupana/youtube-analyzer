@@ -5,11 +5,13 @@ from app.core import llm_config
 from app.core.llm_config import (
     LLMProvider,
     RagConfig,
+    TranscriptConfig,
     WhisperConfig,
     get_current_provider,
     get_provider_by_id,
     get_providers,
     get_rag_config,
+    get_transcript_config,
     get_whisper_config,
     load_config,
     set_current_provider,
@@ -24,12 +26,14 @@ def reset_llm_config():
     llm_config._default_provider_id = None
     llm_config._whisper_config = WhisperConfig()
     llm_config._rag_config = RagConfig()
+    llm_config._transcript_config = TranscriptConfig()
     yield
     llm_config._providers = {}
     llm_config._current_provider_id = None
     llm_config._default_provider_id = None
     llm_config._whisper_config = WhisperConfig()
     llm_config._rag_config = RagConfig()
+    llm_config._transcript_config = TranscriptConfig()
 
 
 class TestLoadConfig:
@@ -343,3 +347,58 @@ class TestRagConfig:
         assert rag_cfg.chunk_overlap == 50
         assert rag_cfg.top_k == 10
         assert rag_cfg.max_context_tokens == 4000
+
+
+class TestTranscriptConfig:
+    def test_default_transcript_config(self):
+        config = get_transcript_config()
+        assert config.preferred_languages == ["en"]
+        assert config.prefer_manual is True
+
+    def test_transcript_config_from_yaml(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("API_KEY", "test-key")
+
+        config = {
+            "llm_providers": [
+                {
+                    "id": "test",
+                    "name": "Test",
+                    "model": "gemini/gemini-2.0-flash",
+                    "api_key_env": "API_KEY",
+                }
+            ],
+            "transcripts": {
+                "preferred_languages": ["de", "fr", "en"],
+                "prefer_manual": False,
+            },
+        }
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(yaml.dump(config))
+
+        load_config(config_file)
+
+        transcript_cfg = get_transcript_config()
+        assert transcript_cfg.preferred_languages == ["de", "fr", "en"]
+        assert transcript_cfg.prefer_manual is False
+
+    def test_transcript_config_defaults_when_missing(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("API_KEY", "test-key")
+
+        config = {
+            "llm_providers": [
+                {
+                    "id": "test",
+                    "name": "Test",
+                    "model": "gemini/gemini-2.0-flash",
+                    "api_key_env": "API_KEY",
+                }
+            ],
+        }
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(yaml.dump(config))
+
+        load_config(config_file)
+
+        transcript_cfg = get_transcript_config()
+        assert transcript_cfg.preferred_languages == ["en"]
+        assert transcript_cfg.prefer_manual is True

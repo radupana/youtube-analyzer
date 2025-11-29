@@ -1,21 +1,26 @@
 """Embedding service for generating vector representations of text."""
 
 import logging
+from typing import TYPE_CHECKING
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
+
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
 
-_model: SentenceTransformer | None = None
+_model: "SentenceTransformer | None" = None
 MODEL_NAME = "all-MiniLM-L6-v2"
 EMBEDDING_DIMENSION = 384
 
 
-def get_model() -> SentenceTransformer:
+def get_model() -> "SentenceTransformer":
     """Get or initialize the sentence transformer model."""
     global _model
     if _model is None:
+        from sentence_transformers import SentenceTransformer
+
         logger.info(f"Loading embedding model: {MODEL_NAME}")
         _model = SentenceTransformer(MODEL_NAME)
     return _model
