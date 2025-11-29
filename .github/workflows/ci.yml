@@ -17,14 +17,16 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
-      - name: Install linters
-        run: pip install ruff mypy types-PyYAML pydantic pydantic-settings fastapi litellm pyyaml sqlmodel
+          cache: 'pip'
+          cache-dependency-path: backend/requirements-ci.txt
+      - name: Install dependencies
+        run: pip install -r requirements-ci.txt ruff mypy types-PyYAML
       - name: Ruff check
         run: ruff check .
       - name: Ruff format check
         run: ruff format --check .
       - name: Type check
-        run: mypy app --ignore-missing-imports
+        run: mypy app
 
   backend-test:
     runs-on: ubuntu-latest
