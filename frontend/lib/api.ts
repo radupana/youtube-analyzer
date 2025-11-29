@@ -109,22 +109,6 @@ export async function fetchTaskProgress(taskId: string): Promise<{
   return response.json()
 }
 
-export async function sendChatMessage(message: string, sessionId: string): Promise<{ response: string }> {
-  const response = await fetch(`${API_BASE}/chat/message`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, session_id: sessionId }),
-  })
-  if (!response.ok) {
-    const errorData = await response.json()
-    const detail = errorData.detail
-    if (typeof detail === "string") throw new Error(detail)
-    if (Array.isArray(detail)) throw new Error(detail.map((e: { msg: string }) => e.msg).join(", "))
-    throw new Error("Failed to send message")
-  }
-  return response.json()
-}
-
 export async function sendChatMessageStream(
   message: string,
   sessionId: string,
