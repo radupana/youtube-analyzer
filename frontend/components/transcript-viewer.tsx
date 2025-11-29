@@ -156,11 +156,12 @@ export function TranscriptViewer({ segments, hasTimestamps }: TranscriptViewerPr
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div data-testid="transcript-viewer" className="flex flex-col h-full">
       <div className="flex items-center gap-2 p-2 border-b">
         <div className="relative flex-1">
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
+            data-testid="transcript-search-input"
             type="text"
             placeholder="Search transcript..."
             value={query}
@@ -170,6 +171,7 @@ export function TranscriptViewer({ segments, hasTimestamps }: TranscriptViewerPr
           />
           {query && (
             <Button
+              data-testid="transcript-search-clear"
               variant="ghost"
               size="sm"
               onClick={clearSearch}
@@ -182,25 +184,25 @@ export function TranscriptViewer({ segments, hasTimestamps }: TranscriptViewerPr
 
         {matches.length > 0 && (
           <>
-            <span className="text-sm text-muted-foreground whitespace-nowrap">
+            <span data-testid="transcript-match-count" className="text-sm text-muted-foreground whitespace-nowrap">
               {currentMatchIndex + 1} of {matches.length}
             </span>
             <div className="flex gap-1">
-              <Button variant="ghost" size="sm" onClick={goToPrevMatch} className="h-8 w-8 p-0" title="Previous match (Shift+Enter)">
+              <Button data-testid="transcript-prev-match" variant="ghost" size="sm" onClick={goToPrevMatch} className="h-8 w-8 p-0" title="Previous match (Shift+Enter)">
                 <ChevronUp className="h-4 w-4" />
               </Button>
-              <Button variant="ghost" size="sm" onClick={goToNextMatch} className="h-8 w-8 p-0" title="Next match (Enter)">
+              <Button data-testid="transcript-next-match" variant="ghost" size="sm" onClick={goToNextMatch} className="h-8 w-8 p-0" title="Next match (Enter)">
                 <ChevronDown className="h-4 w-4" />
               </Button>
             </div>
           </>
         )}
 
-        {debouncedQuery && matches.length === 0 && <span className="text-sm text-muted-foreground">No matches</span>}
+        {debouncedQuery && matches.length === 0 && <span data-testid="transcript-no-matches" className="text-sm text-muted-foreground">No matches</span>}
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="p-4 space-y-2">
+        <div data-testid="transcript-content" className="p-4 space-y-2">
           {segments.map((segment, index) => (
             <div key={index} className="flex gap-3">
               {hasTimestamps && segment.start_time > 0 && (

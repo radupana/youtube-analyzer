@@ -69,21 +69,22 @@ export function PatternSelector({ videoId, onPatternApplied, onClose }: PatternS
   }
 
   return (
-    <Card>
+    <Card data-testid="pattern-selector">
       <CardHeader className="pb-3 flex flex-row items-center justify-between">
         <CardTitle className="text-lg">Analysis Patterns</CardTitle>
-        <Button variant="ghost" size="sm" onClick={onClose} className="h-8 w-8 p-0">
+        <Button data-testid="pattern-selector-close" variant="ghost" size="sm" onClick={onClose} className="h-8 w-8 p-0">
           <span className="text-lg">&times;</span>
         </Button>
       </CardHeader>
       <CardContent>
-        {error && <p className="text-sm text-red-500 mb-3">{error}</p>}
-        <div className="grid grid-cols-2 gap-2">
+        {error && <p data-testid="pattern-selector-error" className="text-sm text-red-500 mb-3">{error}</p>}
+        <div data-testid="patterns-list" className="grid grid-cols-2 gap-2">
           {patterns.map(pattern => {
             const cached = cachedResults[pattern.id]
             return (
               <div key={pattern.id} className="relative">
                 <Button
+                  data-testid={`pattern-${pattern.id}`}
                   variant="outline"
                   className={`h-auto w-full p-3 flex flex-col items-start text-left ${
                     cached ? "border-green-500/50 bg-green-50/50 dark:bg-green-950/20" : ""
@@ -111,6 +112,7 @@ export function PatternSelector({ videoId, onPatternApplied, onClose }: PatternS
                 </Button>
                 {cached && (
                   <Button
+                    data-testid={`pattern-refresh-${pattern.id}`}
                     variant="ghost"
                     size="sm"
                     className="absolute top-1 right-1 h-6 w-6 p-0"

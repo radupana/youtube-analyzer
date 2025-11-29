@@ -387,6 +387,7 @@ export default function Home() {
             <div className="flex items-center gap-2">
               <Label htmlFor="provider" className="text-sm text-muted-foreground">Model:</Label>
               <select
+                data-testid="provider-dropdown"
                 id="provider"
                 value={currentProvider?.id || ""}
                 onChange={e => handleProviderChange(e.target.value)}
@@ -413,6 +414,7 @@ export default function Home() {
                 <CardContent className="space-y-3">
                   <div>
                     <Input
+                      data-testid="url-input"
                       type="url"
                       placeholder="https://youtube.com/watch?v=..."
                       value={inputUrl}
@@ -423,9 +425,10 @@ export default function Home() {
                       disabled={loading || !sessionId}
                       className={urlError ? "border-red-500" : ""}
                     />
-                    {urlError && <p className="text-sm text-red-500 mt-1">{urlError}</p>}
+                    {urlError && <p data-testid="url-error" className="text-sm text-red-500 mt-1">{urlError}</p>}
                   </div>
                   <Button
+                    data-testid="add-video-button"
                     onClick={handleAddVideo}
                     disabled={loading || !inputUrl || !sessionId}
                     className="w-full"
@@ -435,7 +438,7 @@ export default function Home() {
                   </Button>
 
                   {taskProgress && (
-                    <div className="p-2 border rounded bg-muted/50 text-sm">
+                    <div data-testid="task-progress" className="p-2 border rounded bg-muted/50 text-sm">
                       <div className="font-medium">{taskProgress.message}</div>
                       {taskProgress.current_video && (
                         <div className="text-xs text-muted-foreground truncate">{taskProgress.current_video}</div>
@@ -455,19 +458,19 @@ export default function Home() {
                 <CardHeader className="pb-3">
                   <CardTitle className="text-lg">Videos ({videos.length})</CardTitle>
                 </CardHeader>
-                <CardContent className="flex-1 overflow-y-auto">
+                <CardContent data-testid="videos-list" className="flex-1 overflow-y-auto">
                   {videos.length === 0 ? (
                     <p className="text-sm text-muted-foreground">No videos loaded</p>
                   ) : (
                     <ul className="space-y-2">
                       {videos.map(video => (
-                        <li key={video.id} className="p-2 border rounded text-sm">
+                        <li key={video.id} data-testid={`video-card-${video.id}`} className="p-2 border rounded text-sm">
                           <div className="flex justify-between items-start gap-2">
                             <div className="min-w-0 flex-1">
-                              <div className="font-medium truncate" title={video.title}>{video.title}</div>
+                              <div data-testid={`video-title-${video.id}`} className="font-medium truncate" title={video.title}>{video.title}</div>
                               <div className="text-xs text-muted-foreground">{video.channel_title}</div>
                               <div className="text-xs mt-1">
-                                <span className={getStatusColor(video.status)}>{getStatusText(video.status)}</span>
+                                <span data-testid={`video-status-${video.id}`} className={getStatusColor(video.status)}>{getStatusText(video.status)}</span>
                                 {video.transcript_source === "youtube" && <span className="text-green-600"> · Captions</span>}
                                 {video.transcript_source === "whisper" && <span className="text-blue-600"> · Whisper</span>}
                               </div>
@@ -479,6 +482,7 @@ export default function Home() {
                                     <Tooltip>
                                       <TooltipTrigger asChild>
                                         <Button
+                                          data-testid={`pattern-button-${video.id}`}
                                           size="sm"
                                           variant="ghost"
                                           onClick={() => setSelectedVideoForPattern(selectedVideoForPattern === video.id ? null : video.id)}
@@ -492,6 +496,7 @@ export default function Home() {
                                     <Tooltip>
                                       <TooltipTrigger asChild>
                                         <Button
+                                          data-testid={`transcript-button-${video.id}`}
                                           size="sm"
                                           variant="ghost"
                                           onClick={() => handleViewTranscript(video.id)}
@@ -512,6 +517,7 @@ export default function Home() {
                                     <Tooltip>
                                       <TooltipTrigger asChild>
                                         <Button
+                                          data-testid={`copy-button-${video.id}`}
                                           size="sm"
                                           variant="ghost"
                                           onClick={() => handleCopy(video.id)}
@@ -530,7 +536,7 @@ export default function Home() {
                                       <TooltipTrigger asChild>
                                         <DropdownMenu>
                                           <DropdownMenuTrigger asChild>
-                                            <Button size="sm" variant="ghost" className="h-6 w-6 p-0">
+                                            <Button data-testid={`export-button-${video.id}`} size="sm" variant="ghost" className="h-6 w-6 p-0">
                                               <Download className="h-3 w-3" />
                                             </Button>
                                           </DropdownMenuTrigger>
@@ -557,6 +563,7 @@ export default function Home() {
                                 <Tooltip>
                                   <TooltipTrigger asChild>
                                     <Button
+                                      data-testid={`remove-button-${video.id}`}
                                       size="sm"
                                       variant="ghost"
                                       onClick={() => handleRemoveVideo(video)}
@@ -613,13 +620,13 @@ export default function Home() {
                   </CardContent>
                 </Card>
               )}
-              <Card className="flex-1 flex flex-col min-h-0">
+              <Card data-testid="chat-card" className="flex-1 flex flex-col min-h-0">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-lg">Chat</CardTitle>
                   <CardDescription>Ask questions about your videos</CardDescription>
                 </CardHeader>
                 <CardContent className="flex-1 flex flex-col min-h-0 p-0">
-                  <div className="flex-1 overflow-y-auto px-6 py-2">
+                  <div data-testid="chat-messages" className="flex-1 overflow-y-auto px-6 py-2">
                     {messages.length === 0 ? (
                       <p className="text-sm text-muted-foreground text-center py-8">
                         Add a video and ask questions about it
@@ -629,6 +636,7 @@ export default function Home() {
                         {messages.map((message, index) => (
                           <div
                             key={index}
+                            data-testid={`chat-message-${message.role}-${index}`}
                             className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
                           >
                             <div
@@ -649,7 +657,7 @@ export default function Home() {
                           </div>
                         ))}
                         {sendingMessage && messages[messages.length - 1]?.content === "" && (
-                          <div className="flex justify-start">
+                          <div data-testid="chat-generating" className="flex justify-start">
                             <div className="bg-muted rounded-lg px-3 py-2 text-sm text-muted-foreground animate-pulse">
                               Generating...
                             </div>
@@ -661,6 +669,7 @@ export default function Home() {
 
                   <div className="flex gap-2 p-4 border-t">
                     <Input
+                      data-testid="chat-input"
                       placeholder="Ask about the videos..."
                       value={chatInput}
                       onChange={e => setChatInput(e.target.value)}
@@ -668,6 +677,7 @@ export default function Home() {
                       disabled={sendingMessage || !sessionId}
                     />
                     <Button
+                      data-testid="chat-send-button"
                       onClick={handleSendMessage}
                       disabled={sendingMessage || !chatInput.trim() || !sessionId}
                     >

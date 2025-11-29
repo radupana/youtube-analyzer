@@ -145,21 +145,22 @@ export function SessionSidebar({
   }
 
   return (
-    <div className="w-64 border-r bg-muted/30 flex flex-col">
+    <div data-testid="session-sidebar" className="w-64 border-r bg-muted/30 flex flex-col">
       <div className="p-3 border-b">
-        <Button onClick={handleCreateSession} className="w-full" size="sm">
+        <Button data-testid="new-session-button" onClick={handleCreateSession} className="w-full" size="sm">
           + New Session
         </Button>
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="p-2 space-y-1">
+        <div data-testid="sessions-list" className="p-2 space-y-1">
           {sessions.length === 0 ? (
             <p className="text-sm text-muted-foreground p-2">No sessions yet</p>
           ) : (
             sessions.map(session => (
               <div
                 key={session.id}
+                data-testid={`session-${session.id}`}
                 className={`group relative p-2 rounded-md cursor-pointer transition-colors ${
                   session.id === activeSessionId
                     ? "bg-primary/10 border border-primary/20"
@@ -201,6 +202,7 @@ export function SessionSidebar({
 
                 <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
+                    data-testid={`rename-session-${session.id}`}
                     className="text-muted-foreground hover:text-primary"
                     onClick={e => {
                       e.stopPropagation()
@@ -214,6 +216,7 @@ export function SessionSidebar({
                     </svg>
                   </button>
                   <button
+                    data-testid={`delete-session-${session.id}`}
                     className="text-muted-foreground hover:text-red-600"
                     onClick={e => {
                       e.stopPropagation()

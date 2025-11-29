@@ -23,23 +23,23 @@ export function PatternResult({ patternName, result, modelUsed, onClose }: Patte
   }
 
   return (
-    <Card className="max-h-[50vh] flex flex-col">
+    <Card data-testid="pattern-result" className="max-h-[50vh] flex flex-col">
       <CardHeader className="flex flex-row items-center justify-between pb-2 shrink-0">
-        <CardTitle className="text-base">{patternName}</CardTitle>
+        <CardTitle data-testid="pattern-result-title" className="text-base">{patternName}</CardTitle>
         <div className="flex gap-1">
-          <Button variant="ghost" size="sm" onClick={handleCopy} className="h-8 w-8 p-0">
+          <Button data-testid="pattern-result-copy" variant="ghost" size="sm" onClick={handleCopy} className="h-8 w-8 p-0">
             {copied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
           </Button>
-          <Button variant="ghost" size="sm" onClick={onClose} className="h-8 w-8 p-0">
+          <Button data-testid="pattern-result-close" variant="ghost" size="sm" onClick={onClose} className="h-8 w-8 p-0">
             <X className="h-4 w-4" />
           </Button>
         </div>
       </CardHeader>
       <CardContent className="flex-1 overflow-y-auto min-h-0">
-        <div className="prose prose-sm max-w-none dark:prose-invert">
+        <div data-testid="pattern-result-content" className="prose prose-sm max-w-none dark:prose-invert">
           <ReactMarkdown>{result}</ReactMarkdown>
         </div>
-        <div className="text-xs text-muted-foreground mt-4 pt-2 border-t">
+        <div data-testid="pattern-result-model" className="text-xs text-muted-foreground mt-4 pt-2 border-t">
           Generated with {modelUsed}
         </div>
       </CardContent>
