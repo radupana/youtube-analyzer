@@ -264,3 +264,171 @@ class TestTranscribeAudio:
                 )
 
                 assert result is None
+
+    def test_transcribe_audio_file_too_small(self):
+        with patch("os.path.getsize", return_value=500):
+            result = whisper_module._transcribe_audio(
+                "/path/to/audio.mp3", "test_video_id"
+            )
+            assert result is None
+
+    def test_transcribe_audio_with_progress_callback(self):
+        mock_model = MagicMock()
+        mock_model.transcribe.return_value = {"text": "Hello world"}
+        progress_calls = []
+
+        def track_progress(step, message):
+            progress_calls.append((step, message))
+
+        with patch.object(whisper_module, "whisper") as mock_whisper:
+            mock_whisper.load_model.return_value = mock_model
+
+            with (
+                patch("app.services.whisper.get_whisper_config") as mock_config,
+                patch("os.path.getsize", return_value=10000),
+            ):
+                mock_config.return_value = MagicMock(
+                    model="base",
+                    unload_timeout=300,
+                )
+
+                result = whisper_module._transcribe_audio(
+                    "/path/to/audio.mp3",
+                    "test_video_id",
+                    progress_callback=track_progress,
+                    duration_msg=" (~30s audio)",
+                )
+
+                assert result == "Hello world"
+                assert len(progress_calls) == 1
+                assert progress_calls[0][0] == "whisper_transcribing"
+                assert "~30s audio" in progress_calls[0][1]
+
+    def test_transcribe_sets_current_video_id(self):
+        mock_model = MagicMock()
+        mock_model.transcribe.return_value = {"text": "Hello"}
+        captured_video_id = None
+
+        def capture_current(*args, **kwargs):
+            nonlocal captured_video_id
+            captured_video_id = whisper_module._current_video_id
+            return {"text": "Hello"}
+
+        mock_model.transcribe.side_effect = capture_current
+
+        with patch.object(whisper_module, "whisper") as mock_whisper:
+            mock_whisper.load_model.return_value = mock_model
+
+            with (
+                patch("app.services.whisper.get_whisper_config") as mock_config,
+                patch("os.path.getsize", return_value=10000),
+            ):
+                mock_config.return_value = MagicMock(
+                    model="base",
+                    unload_timeout=300,
+                )
+
+                whisper_module._transcribe_audio("/path/to/audio.mp3", "my_video_123")
+
+                assert captured_video_id == "my_video_123"
+                # After transcription, should be cleared
+                assert whisper_module._current_video_id is None
+
+
+class TestTranscriptionStatus:
+    def test_is_transcription_in_progress_false(self):
+        whisper_module._current_video_id = None
+        assert whisper_module.is_transcription_in_progress() is False
+
+    def test_is_transcription_in_progress_true(self):
+        whisper_module._current_video_id = "some_video"
+        assert whisper_module.is_transcription_in_progress() is True
+        whisper_module._current_video_id = None
+
+    def test_get_current_transcription_none(self):
+        whisper_module._current_video_id = None
+        assert whisper_module.get_current_transcription() is None
+
+    def test_get_current_transcription_returns_video_id(self):
+        whisper_module._current_video_id = "video_abc"
+        assert whisper_module.get_current_transcription() == "video_abc"
+        whisper_module._current_video_id = None
+
+    def test_get_model_info_includes_transcribing(self):
+        whisper_module._current_video_id = "transcribing_video"
+        info = whisper_module.get_model_info()
+        assert info["transcribing"] == "transcribing_video"
+        whisper_module._current_video_id = None
+
+
+class TestDownloadFunctions:
+    def test_download_with_pytube_not_installed(self):
+        with patch.object(whisper_module, "YouTube", None):
+            result = whisper_module._download_with_pytube("test123", "/tmp")
+            assert result is None
+
+    def test_download_with_ytdlp_exception(self):
+        with patch("yt_dlp.YoutubeDL") as mock_ydl:
+            mock_ydl.return_value.__enter__ = MagicMock(
+                side_effect=Exception("Download failed")
+            )
+            result = whisper_module._download_with_ytdlp("test123", "/tmp")
+            assert result is None
+
+    def test_download_with_ytdlp_file_too_small(self):
+        with (
+            patch("yt_dlp.YoutubeDL") as mock_ydl,
+            patch("os.path.exists", return_value=True),
+            patch("os.path.getsize", return_value=500),
+        ):
+            mock_instance = MagicMock()
+            mock_ydl.return_value.__enter__.return_value = mock_instance
+            mock_ydl.return_value.__exit__ = MagicMock(return_value=False)
+
+            result = whisper_module._download_with_ytdlp("test123", "/tmp")
+            assert result is None
+
+    def test_download_with_ytdlp_update_exception(self):
+        with patch("subprocess.run", side_effect=Exception("pip failed")):
+            result = whisper_module._download_with_ytdlp_update("test123", "/tmp")
+            assert result is None
+
+
+class TestGetWhisperTranscript:
+    def test_get_whisper_transcript_all_downloads_fail(self):
+        with (
+            patch.object(whisper_module, "_download_with_ytdlp", return_value=None),
+            patch.object(whisper_module, "_download_with_pytube", return_value=None),
+            patch.object(
+                whisper_module, "_download_with_ytdlp_update", return_value=None
+            ),
+        ):
+            result = whisper_module.get_whisper_transcript("test123")
+            assert result is None
+
+    def test_get_whisper_transcript_exception(self):
+        with patch.object(
+            whisper_module,
+            "_download_with_ytdlp",
+            side_effect=Exception("Unexpected error"),
+        ):
+            result = whisper_module.get_whisper_transcript("test123")
+            assert result is None
+
+    def test_get_whisper_transcript_with_progress_callback(self):
+        progress_calls = []
+
+        def track_progress(step, message):
+            progress_calls.append((step, message))
+
+        with (
+            patch.object(whisper_module, "_download_with_ytdlp", return_value=None),
+            patch.object(whisper_module, "_download_with_pytube", return_value=None),
+            patch.object(
+                whisper_module, "_download_with_ytdlp_update", return_value=None
+            ),
+        ):
+            whisper_module.get_whisper_transcript("test123", track_progress)
+
+            # Should have called progress for downloading attempts
+            assert any("download" in call[1].lower() for call in progress_calls)

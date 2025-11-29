@@ -425,3 +425,250 @@ def test_session_video_without_video_record(test_client):
     assert video["id"] == "pending123"
     assert "Loading..." in video["title"]
     assert video["status"] == "pending"
+
+
+def test_export_txt(test_client):
+    client, engine = test_client
+    with Session(engine) as db:
+        video = Video(
+            id="export_test",
+            title="Export Test Video",
+            channel_id="ch123",
+            channel_title="Test Channel",
+            duration="PT10M",
+            published_at=utc_now(),
+            transcript="This is a test transcript for export.",
+            transcript_source="youtube",
+        )
+        db.add(video)
+        db.commit()
+
+    response = client.get("/api/v1/videos/export_test/export?format=txt")
+    assert response.status_code == 200
+    assert "attachment" in response.headers.get("content-disposition", "")
+    assert "Export_Test_Video" in response.headers.get("content-disposition", "")
+
+
+def test_export_markdown(test_client):
+    client, engine = test_client
+    with Session(engine) as db:
+        video = Video(
+            id="export_md",
+            title="Markdown Export",
+            channel_id="ch123",
+            channel_title="Test Channel",
+            duration="PT10M",
+            published_at=utc_now(),
+            transcript="Test transcript content.",
+            transcript_source="youtube",
+        )
+        db.add(video)
+        db.commit()
+
+    response = client.get("/api/v1/videos/export_md/export?format=md")
+    assert response.status_code == 200
+    assert "text/markdown" in response.headers.get("content-type", "")
+
+
+def test_export_srt_no_chunks(test_client):
+    client, engine = test_client
+    with Session(engine) as db:
+        video = Video(
+            id="export_srt",
+            title="SRT Export",
+            channel_id="ch123",
+            channel_title="Test Channel",
+            duration="PT10M",
+            published_at=utc_now(),
+            transcript="Test transcript.",
+            transcript_source="whisper",
+        )
+        db.add(video)
+        db.commit()
+
+    response = client.get("/api/v1/videos/export_srt/export?format=srt")
+    assert response.status_code == 400
+    assert "timestamp" in response.json()["detail"].lower()
+
+
+def test_export_srt_with_chunks(test_client):
+    client, engine = test_client
+    with Session(engine) as db:
+        video = Video(
+            id="export_srt2",
+            title="SRT Export With Chunks",
+            channel_id="ch123",
+            channel_title="Test Channel",
+            duration="PT10M",
+            published_at=utc_now(),
+            transcript="Hello world.",
+            transcript_source="youtube",
+        )
+        db.add(video)
+        db.commit()
+
+        chunk = Chunk(
+            id="export_srt2_0",
+            video_id="export_srt2",
+            text="Hello world.",
+            start_time=0.0,
+            end_time=5.0,
+            token_count=3,
+            embedding=b"fake",
+        )
+        db.add(chunk)
+        db.commit()
+
+    response = client.get("/api/v1/videos/export_srt2/export?format=srt")
+    assert response.status_code == 200
+    assert "text/srt" in response.headers.get("content-type", "")
+
+
+def test_export_json(test_client):
+    client, engine = test_client
+    with Session(engine) as db:
+        video = Video(
+            id="export_json",
+            title="JSON Export",
+            channel_id="ch123",
+            channel_title="Test Channel",
+            duration="PT10M",
+            published_at=utc_now(),
+            transcript="Test transcript.",
+            transcript_source="youtube",
+        )
+        db.add(video)
+        db.commit()
+
+    response = client.get("/api/v1/videos/export_json/export?format=json")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["video_id"] == "export_json"
+    assert data["title"] == "JSON Export"
+
+
+def test_export_not_found(test_client):
+    client, _ = test_client
+    response = client.get("/api/v1/videos/nonexistent/export?format=txt")
+    assert response.status_code == 404
+
+
+def test_export_no_transcript(test_client):
+    client, engine = test_client
+    with Session(engine) as db:
+        video = Video(
+            id="no_transcript",
+            title="No Transcript",
+            channel_id="ch123",
+            channel_title="Test Channel",
+            duration="PT10M",
+            published_at=utc_now(),
+            transcript=None,
+        )
+        db.add(video)
+        db.commit()
+
+    response = client.get("/api/v1/videos/no_transcript/export?format=txt")
+    assert response.status_code == 400
+    assert "No transcript" in response.json()["detail"]
+
+
+def test_delete_video_success(test_client):
+    client, engine = test_client
+    session_id = create_session(client)
+
+    with Session(engine) as db:
+        video = Video(
+            id="delete_me",
+            title="Delete Me",
+            channel_id="ch123",
+            channel_title="Test Channel",
+            duration="PT10M",
+            published_at=utc_now(),
+            transcript="Test",
+        )
+        db.add(video)
+        db.commit()
+
+        sv = SessionVideo(
+            session_id=session_id,
+            video_id="delete_me",
+            status="ready",
+        )
+        db.add(sv)
+        db.commit()
+
+    response = client.delete("/api/v1/videos/delete_me")
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+
+    # Verify video is deleted
+    response = client.get("/api/v1/videos/delete_me")
+    assert response.status_code == 404
+
+
+def test_remove_video_from_session(test_client):
+    client, engine = test_client
+    session_id = create_session(client)
+
+    with Session(engine) as db:
+        video = Video(
+            id="remove_from_session",
+            title="Remove From Session",
+            channel_id="ch123",
+            channel_title="Test Channel",
+            duration="PT10M",
+            published_at=utc_now(),
+            transcript="Test",
+        )
+        db.add(video)
+        db.commit()
+
+        sv = SessionVideo(
+            session_id=session_id,
+            video_id="remove_from_session",
+            status="ready",
+        )
+        db.add(sv)
+        db.commit()
+
+    response = client.delete(
+        f"/api/v1/videos/session/{session_id}/video/remove_from_session"
+    )
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+
+
+def test_remove_video_from_session_not_found(test_client):
+    client, _ = test_client
+    session_id = create_session(client)
+    response = client.delete(f"/api/v1/videos/session/{session_id}/video/nonexistent")
+    assert response.status_code == 404
+
+
+def test_clear_cache(test_client):
+    client, engine = test_client
+    with Session(engine) as db:
+        video = Video(
+            id="cache_video",
+            title="Cache Video",
+            channel_id="ch123",
+            channel_title="Test Channel",
+            duration="PT10M",
+            published_at=utc_now(),
+            transcript="Test",
+        )
+        db.add(video)
+        db.commit()
+
+    response = client.delete("/api/v1/videos/cache/clear")
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert response.json()["videos_cleared"] >= 1
+
+
+def test_list_session_videos_session_not_found(test_client):
+    client, _ = test_client
+    response = client.get("/api/v1/videos/session/nonexistent-session")
+    assert response.status_code == 404
+    assert "Session not found" in response.json()["detail"]
