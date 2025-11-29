@@ -5,8 +5,6 @@ import logging
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
-from app.services.chunking import TranscriptChunk
-
 logger = logging.getLogger(__name__)
 
 _model: SentenceTransformer | None = None
@@ -53,27 +51,6 @@ def generate_embeddings(texts: list[str]) -> np.ndarray:
     model = get_model()
     embeddings = model.encode(texts, convert_to_numpy=True)
     return embeddings.astype(np.float32)
-
-
-def generate_chunk_embeddings(
-    chunks: list[TranscriptChunk],
-) -> list[tuple[TranscriptChunk, np.ndarray]]:
-    """
-    Generate embeddings for transcript chunks.
-
-    Args:
-        chunks: List of TranscriptChunk objects
-
-    Returns:
-        List of (chunk, embedding) tuples
-    """
-    if not chunks:
-        return []
-
-    texts = [chunk.text for chunk in chunks]
-    embeddings = generate_embeddings(texts)
-
-    return list(zip(chunks, embeddings, strict=True))
 
 
 def generate_query_embedding(query: str) -> np.ndarray:

@@ -50,12 +50,6 @@ class ChatRequest(BaseModel):
     session_id: str | None = None
 
 
-class ChatResponse(BaseModel):
-    response: str
-    session_id: str
-    timestamp: datetime = Field(default_factory=datetime.now)
-
-
 class TaskStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
