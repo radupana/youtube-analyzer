@@ -9,7 +9,8 @@ from app.core.llm_config import (
     get_providers,
     set_current_provider,
 )
-from app.services import embeddings as emb_module
+from app.services.embeddings import clear_model as clear_embeddings
+from app.services.embeddings import is_model_loaded as is_embeddings_loaded
 from app.services.whisper import get_model_info as get_whisper_info
 from app.services.whisper import unload_model as unload_whisper
 
@@ -57,7 +58,7 @@ async def get_models_status() -> dict[str, Any]:
     """Get status of loaded AI models."""
     return {
         "whisper": get_whisper_info(),
-        "embeddings": {"loaded": emb_module._model is not None},
+        "embeddings": {"loaded": is_embeddings_loaded()},
     }
 
 
@@ -74,7 +75,7 @@ async def unload_models(
         unloaded.append("whisper")
 
     if embeddings:
-        emb_module.clear_model()
+        clear_embeddings()
         unloaded.append("embeddings")
 
     return {"unloaded": unloaded}

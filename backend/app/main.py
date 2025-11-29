@@ -9,8 +9,9 @@ from app.api_v1.endpoints import analysis, chat, sessions, settings, transcripts
 from app.core.config import get_settings
 from app.core.llm_config import load_config
 from app.db.database import init_db
-from app.services import embeddings as emb_module
+from app.services.embeddings import is_model_loaded as is_embeddings_loaded
 from app.services.whisper import get_model_info as get_whisper_info
+from app.services.whisper import unload_model as unload_whisper
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -26,6 +27,7 @@ load_config()
 async def lifespan(app: FastAPI):
     init_db()
     yield
+    unload_whisper()
 
 
 app = FastAPI(
@@ -77,6 +79,6 @@ async def health_check():
         },
         "models": {
             "whisper": get_whisper_info(),
-            "embeddings": {"loaded": emb_module._model is not None},
+            "embeddings": {"loaded": is_embeddings_loaded()},
         },
     }

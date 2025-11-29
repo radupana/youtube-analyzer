@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from collections.abc import Callable
 from typing import Any
 
 import yt_dlp
@@ -128,17 +129,19 @@ def _schedule_unload() -> None:
 
 def is_model_loaded() -> bool:
     """Check if Whisper model is currently loaded."""
-    return _model is not None
+    with _lock:
+        return _model is not None
 
 
 def get_model_info() -> dict[str, Any]:
     """Get current model status for health endpoint."""
-    return {
-        "loaded": _model is not None,
-        "model_name": _model_name,
-        "last_used": _last_used if _last_used > 0 else None,
-        "idle_seconds": int(time.time() - _last_used) if _last_used > 0 else None,
-    }
+    with _lock:
+        return {
+            "loaded": _model is not None,
+            "model_name": _model_name,
+            "last_used": _last_used if _last_used > 0 else None,
+            "idle_seconds": int(time.time() - _last_used) if _last_used > 0 else None,
+        }
 
 
 def _transcribe_audio(audio_path: str) -> str | None:
@@ -267,7 +270,9 @@ def _download_with_ytdlp_update(video_id: str, temp_dir: str) -> str | None:
     return None
 
 
-def get_whisper_transcript(video_id: str, progress_callback: Any = None) -> str | None:
+def get_whisper_transcript(
+    video_id: str, progress_callback: Callable[[str, str], None] | None = None
+) -> str | None:
     """Get transcript using Whisper (download audio + transcribe)."""
     try:
         logger.info(f"Using Whisper fallback for video {video_id}")
