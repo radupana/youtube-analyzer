@@ -208,6 +208,26 @@ async def process_video_for_session(
             )
             return
 
+        # Save Video record early so title is available during processing
+        with Session(get_engine()) as db:
+            existing = db.get(Video, video_id)
+            if not existing:
+                db_video = Video(
+                    id=video_id,
+                    title=video_info["title"],
+                    channel_id=video_info["channel_id"],
+                    channel_title=video_info["channel_title"],
+                    description=video_info.get("description", ""),
+                    duration=video_info["duration"],
+                    published_at=video_info["published_at"],
+                    view_count=video_info.get("view_count", 0),
+                    like_count=video_info.get("like_count", 0),
+                    transcript=None,
+                    transcript_source=None,
+                )
+                db.add(db_video)
+                db.commit()
+
         _update_session_video_progress(
             session_video_id, "processing", 40.0, "Fetching transcript..."
         )
@@ -229,30 +249,14 @@ async def process_video_for_session(
             youtube_service.get_transcript, video_id, None, whisper_progress
         )
 
-        db_video = Video(
-            id=video_id,
-            title=video_info["title"],
-            channel_id=video_info["channel_id"],
-            channel_title=video_info["channel_title"],
-            description=video_info.get("description", ""),
-            duration=video_info["duration"],
-            published_at=video_info["published_at"],
-            view_count=video_info.get("view_count", 0),
-            like_count=video_info.get("like_count", 0),
-            transcript=transcript,
-            transcript_source=source if transcript else "none",
-        )
-
+        # Update transcript in existing Video record (created earlier with metadata)
         with Session(get_engine()) as db:
             existing = db.get(Video, video_id)
-            if existing:
-                if transcript and not existing.transcript:
-                    existing.transcript = transcript
-                    existing.transcript_source = source
-                    db.add(existing)
-            else:
-                db.add(db_video)
-            db.commit()
+            if existing and transcript and not existing.transcript:
+                existing.transcript = transcript
+                existing.transcript_source = source
+                db.add(existing)
+                db.commit()
 
         if transcript:
             _update_session_video_progress(
