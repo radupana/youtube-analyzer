@@ -215,6 +215,8 @@ __marimo__/
 
 # Project documentation (private)
 *.md
+!README.md
+!CLAUDE.md
 !.github/copilot-instructions.md
 
 # Project specific
@@ -244,4 +246,5 @@ backend/.venv/
 backend/__pycache__/
 backend/*.db
 backend/file:*
+file:*
 backend/.env

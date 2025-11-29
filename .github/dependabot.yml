@@ -2,11 +2,10 @@ version: 2
 updates:
   # Python dependencies
   - package-ecosystem: "pip"
-    directory: "/"
+    directory: "/backend"
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "06:00"
+      interval: "daily"
+      time: "00:00"
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
@@ -26,13 +25,26 @@ updates:
           - "minor"
           - "patch"
 
+  # npm/Node.js dependencies
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "daily"
+      time: "00:00"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "javascript"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
   # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "06:00"
+      interval: "daily"
+      time: "00:00"
     labels:
       - "dependencies"
       - "github-actions"

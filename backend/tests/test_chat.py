@@ -113,3 +113,90 @@ def test_chat_without_provider(test_client):
         response = client.post("/api/v1/chat/message", json={"message": "Hello"})
         assert response.status_code == 503
         assert "No LLM provider configured" in response.json()["detail"]
+
+
+@pytest.fixture
+def mock_llm_stream(mock_provider):
+    with patch("app.core.llm_config.get_current_provider", return_value=mock_provider):
+        with patch("app.services.llm.litellm.acompletion") as mock:
+            mock.return_value = mock_stream_async_generator()
+            yield mock
+
+
+def mock_stream_async_generator():
+    class MockDelta:
+        def __init__(self, content):
+            self.content = content
+
+    class MockChoice:
+        def __init__(self, content):
+            self.delta = MockDelta(content)
+
+    class MockChunk:
+        def __init__(self, content):
+            self.choices = [MockChoice(content)]
+
+    class AsyncGen:
+        def __init__(self):
+            self.chunks = ["Hello", " ", "world", "!"]
+            self.index = 0
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if self.index >= len(self.chunks):
+                raise StopAsyncIteration
+            chunk = MockChunk(self.chunks[self.index])
+            self.index += 1
+            return chunk
+
+    return AsyncGen()
+
+
+def test_stream_message(test_client, mock_llm_stream):
+    client, _ = test_client
+    response = client.post(
+        "/api/v1/chat/message/stream",
+        json={"message": "Hello, how are you?"},
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
+
+    content = response.text
+    assert "data:" in content
+    assert "[DONE]" in content
+
+
+def test_stream_message_with_session_id(test_client, mock_llm_stream):
+    client, _ = test_client
+    session_id = create_session(client)
+    response = client.post(
+        "/api/v1/chat/message/stream",
+        json={"message": "Hello again", "session_id": session_id},
+    )
+    assert response.status_code == 200
+    content = response.text
+    assert f"data: {session_id}" in content
+
+
+def test_stream_message_invalid_session(test_client, mock_provider):
+    client, _ = test_client
+    with patch("app.core.llm_config.get_current_provider", return_value=mock_provider):
+        response = client.post(
+            "/api/v1/chat/message/stream",
+            json={"message": "Hello", "session_id": "nonexistent-session"},
+        )
+        assert response.status_code == 404
+        assert "Session not found" in response.json()["detail"]
+
+
+def test_stream_without_provider(test_client):
+    client, _ = test_client
+    session_id = create_session(client)
+    with patch("app.core.llm_config.get_current_provider", return_value=None):
+        response = client.post(
+            "/api/v1/chat/message/stream",
+            json={"message": "Hello", "session_id": session_id},
+        )
+        assert response.status_code == 503

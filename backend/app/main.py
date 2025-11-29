@@ -5,11 +5,19 @@ import psutil
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api_v1.endpoints import analysis, chat, sessions, settings, transcripts, videos
+from app.api_v1.endpoints import (
+    chat,
+    patterns,
+    sessions,
+    settings,
+    transcripts,
+    videos,
+)
 from app.core.config import get_settings
 from app.core.llm_config import load_config
 from app.db.database import init_db
 from app.services.embeddings import is_model_loaded as is_embeddings_loaded
+from app.services.patterns import load_patterns
 from app.services.whisper import get_model_info as get_whisper_info
 from app.services.whisper import unload_model as unload_whisper
 
@@ -26,6 +34,7 @@ load_config()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    load_patterns()
     yield
     unload_whisper()
 
@@ -50,9 +59,6 @@ app.include_router(
     videos.router, prefix=f"{app_settings.api_v1_str}/videos", tags=["videos"]
 )
 app.include_router(
-    analysis.router, prefix=f"{app_settings.api_v1_str}/videos", tags=["analysis"]
-)
-app.include_router(
     transcripts.router,
     prefix=f"{app_settings.api_v1_str}/transcripts",
     tags=["transcripts"],
@@ -63,6 +69,9 @@ app.include_router(
 )
 app.include_router(
     sessions.router, prefix=f"{app_settings.api_v1_str}/sessions", tags=["sessions"]
+)
+app.include_router(
+    patterns.router, prefix=f"{app_settings.api_v1_str}/patterns", tags=["patterns"]
 )
 
 

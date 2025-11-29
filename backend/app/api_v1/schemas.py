@@ -125,21 +125,6 @@ class SessionDetailResponse(BaseModel):
     videos: list[SessionVideoResponse]
 
 
-class AnalysisRequest(BaseModel):
-    force_regenerate: bool = False
-
-
-class AnalysisResponse(BaseModel):
-    video_id: str
-    summary: str
-    key_takeaways: list[str]
-    main_topics: list[str]
-    notable_quotes: list[str]
-    model_used: str
-    created_at: datetime
-    cached: bool
-
-
 class TranscriptSegmentSchema(BaseModel):
     text: str
     start_time: float
@@ -152,3 +137,24 @@ class TranscriptResponse(BaseModel):
     full_text: str
     segments: list[TranscriptSegmentSchema]
     has_timestamps: bool
+
+
+class PatternSummaryResponse(BaseModel):
+    id: str
+    name: str
+    description: str
+    icon: str
+    category: str
+
+
+class PatternListResponse(BaseModel):
+    patterns: list[PatternSummaryResponse]
+
+
+class PatternResultResponse(BaseModel):
+    video_id: str
+    pattern_id: str
+    pattern_name: str
+    result: str
+    model_used: str
+    created_at: datetime

@@ -1,6 +1,25 @@
 # YouTube Analyzer
 
+[![CI](https://github.com/radupana/youtube-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/radupana/youtube-analyzer/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/radupana/youtube-analyzer/branch/main/graph/badge.svg)](https://codecov.io/gh/radupana/youtube-analyzer)
+[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Checked with mypy](https://img.shields.io/badge/mypy-checked-blue)](http://mypy-lang.org/)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+
 Analyze YouTube videos using AI. Extract transcripts, ask questions, and get insights through a web interface.
+
+**Why this tool?** Unlike pasting URLs into ChatGPT, this caches transcripts locally, handles videos without captions (via Whisper), lets you build context across multiple videos, and runs entirely on your machine.
+
+![Demo](demo.gif)
+
+**Features:**
+
+- **Real-time streaming responses** - See AI responses appear token-by-token
+- **Pattern analysis** - Apply pre-built analysis templates (Extract Wisdom, Quick Summary, Tutorial Notes, etc.)
+- **Multi-video context** - Chat about multiple videos simultaneously
+- **Whisper fallback** - Transcribe videos without captions using local Whisper
+- **Markdown rendering** - Rich formatted responses with proper lists, bold, code blocks
 
 **Use cases:**
 
@@ -11,7 +30,7 @@ Analyze YouTube videos using AI. Extract transcripts, ask questions, and get ins
 
 ## Prerequisites
 
-1. **Docker & Docker Compose** - [Install Docker](https://docs.docker.com/get-docker/)
+1. **Docker** - [Install Docker](https://docs.docker.com/get-docker/)
 2. **API Keys:**
     - **YouTube Data API v3**: [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
     - **LLM API Key**: From your chosen provider (see Supported LLM Providers below)
@@ -106,6 +125,17 @@ docker-compose down
 # Remove volumes (clears cache)
 docker-compose down -v
 ```
+
+## Troubleshooting
+
+**Whisper transcription is slow**
+Use a smaller model in `config.yaml`: `model: tiny` (fastest) or `model: small` (balanced).
+
+**"No transcript available" error**
+The video has no captions and Whisper fallback may be disabled. Set `fallback_enabled: true` in config.
+
+**Container won't start**
+Check your `.env` file has valid API keys. Run `docker-compose logs` to see errors.
 
 ## License
 

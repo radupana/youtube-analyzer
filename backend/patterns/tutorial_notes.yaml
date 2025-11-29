@@ -1,0 +1,57 @@
+id: tutorial_notes
+name: "Tutorial Notes"
+description: "Extract steps, prerequisites, and commands from technical tutorials"
+icon: "📚"
+category: "learning"
+
+inputs:
+  - transcript
+  - video_title
+  - channel
+
+system_prompt: |
+  You are an expert at extracting structured learning notes from technical tutorials.
+  Focus on practical, actionable information that helps someone follow along or reference later.
+  Be precise with technical details, commands, and code snippets.
+
+user_prompt: |
+  Extract structured tutorial notes from this video.
+
+  VIDEO: {video_title}
+  CHANNEL: {channel}
+
+  TRANSCRIPT:
+  ---
+  {transcript}
+  ---
+
+  Provide your notes in the following format:
+
+  ## Overview
+  What is this tutorial about? What will you learn?
+
+  ## Prerequisites
+  - What knowledge or tools do you need before starting?
+  - Any required installations or accounts?
+
+  ## Step-by-Step Guide
+  1. First major step
+     - Details and sub-steps
+  2. Second major step
+     - Details and sub-steps
+  (Continue for all major steps)
+
+  ## Commands & Code
+  List any commands, code snippets, or configurations mentioned:
+  ```
+  command or code here
+  ```
+
+  ## Resources
+  - Links, tools, or references mentioned in the video
+
+  ## Gotchas & Tips
+  - Common mistakes to avoid
+  - Pro tips mentioned by the presenter
+
+output_format: markdown
