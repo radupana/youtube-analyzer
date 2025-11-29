@@ -1,12 +1,13 @@
 from collections.abc import Generator
 from pathlib import Path
 
+from sqlalchemy import Engine
 from sqlmodel import Session, SQLModel, create_engine
 
 DATABASE_DIR = Path(".data")
 DATABASE_PATH = DATABASE_DIR / "youtube-analyzer.db"
 
-_engine = None
+_engine: Engine | None = None
 
 
 def get_database_url() -> str:
@@ -22,9 +23,12 @@ def init_db() -> None:
     SQLModel.metadata.create_all(_engine)
 
 
-def get_engine():
+def get_engine() -> Engine:
+    global _engine
     if _engine is None:
         init_db()
+    if _engine is None:
+        raise RuntimeError("Database engine failed to initialize")
     return _engine
 
 

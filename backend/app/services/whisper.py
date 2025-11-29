@@ -22,10 +22,6 @@ try:
 except ImportError:
     torch = None  # type: ignore[assignment]
 
-try:
-    from pytube import YouTube
-except ImportError:
-    YouTube = None
 
 from app.core.llm_config import get_whisper_config
 
@@ -255,63 +251,6 @@ def _download_with_ytdlp(video_id: str, temp_dir: str) -> str | None:
     return None
 
 
-def _download_with_pytube(video_id: str, temp_dir: str) -> str | None:
-    """Try downloading with pytube as fallback."""
-    if YouTube is None:
-        return None
-
-    try:
-        url = f"https://www.youtube.com/watch?v={video_id}"
-        audio_path = os.path.join(temp_dir, f"{video_id}.mp3")
-
-        yt = YouTube(url, use_oauth=False, allow_oauth_cache=False)
-        audio_stream = yt.streams.filter(only_audio=True).first()
-
-        if audio_stream:
-            temp_file = audio_stream.download(
-                output_path=temp_dir, filename=f"{video_id}.mp4"
-            )
-            subprocess.run(
-                [
-                    "ffmpeg",
-                    "-i",
-                    temp_file,
-                    "-vn",
-                    "-ar",
-                    "44100",
-                    "-ac",
-                    "2",
-                    "-b:a",
-                    "192k",
-                    audio_path,
-                ],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            os.remove(temp_file)
-
-            if os.path.exists(audio_path):
-                logger.info(f"Downloaded with pytube for {video_id}")
-                return audio_path
-    except Exception as e:
-        logger.warning(f"pytube failed: {e}")
-    return None
-
-
-def _download_with_ytdlp_update(video_id: str, temp_dir: str) -> str | None:
-    """Try updating yt-dlp and downloading again."""
-    try:
-        logger.info("Updating yt-dlp to latest version...")
-        subprocess.run(
-            ["pip", "install", "-U", "yt-dlp"], capture_output=True, text=True
-        )
-        return _download_with_ytdlp(video_id, temp_dir)
-    except Exception as e:
-        logger.warning(f"yt-dlp update and retry failed: {e}")
-    return None
-
-
 def get_whisper_transcript(
     video_id: str, progress_callback: Callable[[str, str], None] | None = None
 ) -> tuple[str, str] | None:
@@ -328,8 +267,6 @@ def get_whisper_transcript(
             progress_callback("whisper_downloading", "Starting audio download...")
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            audio_path = None
-
             logger.info(f"Attempting to download audio for {video_id}...")
 
             if progress_callback:
@@ -337,19 +274,7 @@ def get_whisper_transcript(
             audio_path = _download_with_ytdlp(video_id, temp_dir)
 
             if not audio_path:
-                logger.info("Trying pytube fallback...")
-                if progress_callback:
-                    progress_callback("whisper_downloading", "Retrying download...")
-                audio_path = _download_with_pytube(video_id, temp_dir)
-
-            if not audio_path:
-                logger.info("Trying yt-dlp update and retry...")
-                if progress_callback:
-                    progress_callback("whisper_downloading", "Retrying download...")
-                audio_path = _download_with_ytdlp_update(video_id, temp_dir)
-
-            if not audio_path:
-                logger.error(f"All download methods failed for {video_id}")
+                logger.error(f"Failed to download audio for {video_id}")
                 return None
 
             if progress_callback:

@@ -1,7 +1,11 @@
 # YouTube Analyzer
 
 [![CI](https://github.com/radupana/youtube-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/radupana/youtube-analyzer/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/radupana/youtube-analyzer/branch/main/graph/badge.svg)](https://codecov.io/gh/radupana/youtube-analyzer)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Checked with mypy](https://www.mypy-lang.org/static/mypy_badge.svg)](https://mypy-lang.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 **Stop watching 2-hour videos for 3 key insights.** Extract what matters in seconds.
@@ -71,14 +75,14 @@ llm_providers:
     model: gemini/gemini-2.5-flash
     api_key_env: GEMINI_API_KEY
 
-  - id: gpt-4o
-    name: "GPT-4o"
-    model: openai/gpt-4o
+  - id: gpt5-nano
+    name: "GPT-5 Nano"
+    model: openai/gpt-5-nano
     api_key_env: OPENAI_API_KEY
 
   - id: claude-sonnet
-    name: "Claude Sonnet 4"
-    model: anthropic/claude-sonnet-4-20250514
+    name: "Claude Sonnet 4.5"
+    model: anthropic/claude-sonnet-4-5-20250929
     api_key_env: ANTHROPIC_API_KEY
 
 default_provider: gemini-flash
@@ -93,7 +97,7 @@ Uses [LiteLLM](https://docs.litellm.ai/docs/providers) - any supported provider 
 3. **Chunk & embed** - Splits transcript into semantic chunks with embeddings
 4. **Chat or analyze** - RAG retrieval finds relevant sections for your questions
 
-Everything is cached locally in `.cache/` for fast repeat access.
+Everything is cached locally in an SQLite database for fast repeat access.
 
 ## Troubleshooting
 

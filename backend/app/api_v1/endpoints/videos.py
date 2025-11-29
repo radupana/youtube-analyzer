@@ -3,7 +3,7 @@
 import asyncio
 import json
 import logging
-from datetime import timedelta
+from datetime import UTC, timedelta
 from enum import Enum
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -356,8 +356,6 @@ async def list_session_videos(
         if sv.status == "processing":
             updated_at = sv.updated_at
             if updated_at.tzinfo is None:
-                from datetime import UTC
-
                 updated_at = updated_at.replace(tzinfo=UTC)
             elapsed = now - updated_at
             if elapsed > STALE_PROCESSING_TIMEOUT:
@@ -518,10 +516,9 @@ async def export_transcript(
             media_type="text/srt; charset=utf-8",
         )
 
-    if format == ExportFormat.JSON:
-        chunks = db.exec(
-            select(Chunk).where(Chunk.video_id == video_id).order_by(Chunk.start_time)  # type: ignore[arg-type]
-        ).all()
+    chunks = db.exec(
+        select(Chunk).where(Chunk.video_id == video_id).order_by(Chunk.start_time)  # type: ignore[arg-type]
+    ).all()
 
     pattern_results = db.exec(
         select(PatternResult).where(PatternResult.video_id == video_id)

@@ -1,4 +1,4 @@
-const API_BASE = "http://localhost:8000/api/v1"
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
 
 export interface Session {
   id: string
@@ -162,40 +162,41 @@ export async function sendChatMessageStream(
   let isFirstMessage = true
   let buffer = ""
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
 
-    buffer += decoder.decode(value, { stream: true })
+      buffer += decoder.decode(value, { stream: true })
 
-    // Process complete lines only (SSE format: "data: ...\n\n")
-    const lines = buffer.split("\n")
-    // Keep the last incomplete line in the buffer
-    buffer = lines.pop() || ""
+      const lines = buffer.split("\n")
+      buffer = lines.pop() || ""
 
-    for (const line of lines) {
-      if (line.startsWith("data: ")) {
-        const data = line.slice(6)
-        if (data === "[DONE]") continue
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          const data = line.slice(6)
+          if (data === "[DONE]") continue
 
-        if (isFirstMessage) {
-          onSessionId?.(data)
-          isFirstMessage = false
-        } else {
-          const unescaped = data.replace(/\\n/g, "\n")
-          onChunk(unescaped)
+          if (isFirstMessage) {
+            onSessionId?.(data)
+            isFirstMessage = false
+          } else {
+            const unescaped = data.replace(/\\n/g, "\n")
+            onChunk(unescaped)
+          }
         }
       }
     }
-  }
 
-  // Process any remaining data in buffer
-  if (buffer.startsWith("data: ")) {
-    const data = buffer.slice(6)
-    if (data !== "[DONE]" && !isFirstMessage) {
-      const unescaped = data.replace(/\\n/g, "\n")
-      onChunk(unescaped)
+    if (buffer.startsWith("data: ")) {
+      const data = buffer.slice(6)
+      if (data !== "[DONE]" && !isFirstMessage) {
+        const unescaped = data.replace(/\\n/g, "\n")
+        onChunk(unescaped)
+      }
     }
+  } finally {
+    reader.releaseLock()
   }
 }
 
