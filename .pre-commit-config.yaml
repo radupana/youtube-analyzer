@@ -3,27 +3,13 @@
 # Install hooks: pre-commit install
 
 repos:
-  # Format Python code with Black
-  - repo: https://github.com/psf/black
-    rev: 25.11.0
-    hooks:
-      - id: black
-        language_version: python3.13
-
-  # Sort imports with isort (backend uses ruff for imports)
-  - repo: https://github.com/PyCQA/isort
-    rev: 5.13.2
-    hooks:
-      - id: isort
-        args: ["--profile", "black"]
-        exclude: "^backend/"
-
-  # Lint with Ruff (fast Python linter)
+  # Lint and format with Ruff (matches CI)
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.5
     hooks:
       - id: ruff
         args: ["--fix"]
+      - id: ruff-format
 
   # Type check with MyPy (backend has its own config in pyproject.toml)
   - repo: https://github.com/pre-commit/mirrors-mypy
