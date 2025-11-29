@@ -42,7 +42,6 @@ import {
   fetchSessionVideos,
   addVideo,
   removeVideo,
-  fetchTaskProgress,
   sendChatMessageStream,
   fetchProviders,
   fetchCurrentProvider,
@@ -56,15 +55,6 @@ import {
 interface ChatMessage {
   role: "user" | "assistant"
   content: string
-}
-
-interface TaskProgress {
-  status: string
-  progress: number
-  message: string
-  current_video?: string
-  current_step?: string
-  elapsed_time?: number
 }
 
 interface LLMProvider {
@@ -81,10 +71,7 @@ export default function Home() {
   const [inputUrl, setInputUrl] = useState("")
   const [chatInput, setChatInput] = useState("")
   const [urlError, setUrlError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
   const [sendingMessage, setSendingMessage] = useState(false)
-  const [currentTask, setCurrentTask] = useState<string | null>(null)
-  const [taskProgress, setTaskProgress] = useState<TaskProgress | null>(null)
   const [providers, setProviders] = useState<LLMProvider[]>([])
   const [currentProvider, setCurrentProvider] = useState<LLMProvider | null>(null)
   const [initializing, setInitializing] = useState(true)
@@ -149,29 +136,25 @@ export default function Home() {
   }, [])
 
   useEffect(() => {
-    if (!currentTask) return
+    if (!sessionId) return
+
+    const hasProcessingVideos = videos.some(
+      v => v.status === "pending" || v.status === "processing"
+    )
+
+    if (!hasProcessingVideos) return
 
     const interval = setInterval(async () => {
       try {
-        const progress = await fetchTaskProgress(currentTask)
-        setTaskProgress(progress)
-
-        if (progress.status === "completed" || progress.status === "failed") {
-          setLoading(false)
-          setCurrentTask(null)
-          if (sessionId) {
-            const videos = await fetchSessionVideos(sessionId)
-            setVideos(videos)
-          }
-          setTimeout(() => setTaskProgress(null), 3000)
-        }
+        const updatedVideos = await fetchSessionVideos(sessionId)
+        setVideos(updatedVideos)
       } catch (error) {
-        console.error("Error fetching task progress:", error)
+        console.error("Error polling videos:", error)
       }
-    }, 500)
+    }, 1000)
 
     return () => clearInterval(interval)
-  }, [currentTask, sessionId])
+  }, [sessionId, videos])
 
   const handleSessionSelect = async (sid: string) => {
     await loadSession(sid)
@@ -216,16 +199,13 @@ export default function Home() {
       return
     }
 
-    setLoading(true)
-    setTaskProgress(null)
-
     try {
-      const data = await addVideo(inputUrl, sessionId)
-      setCurrentTask(data.task_id)
+      await addVideo(inputUrl, sessionId)
       setInputUrl("")
+      const updatedVideos = await fetchSessionVideos(sessionId)
+      setVideos(updatedVideos)
     } catch (error) {
       setUrlError(error instanceof Error ? error.message : "Failed to add video")
-      setLoading(false)
     }
   }
 
@@ -352,8 +332,9 @@ export default function Home() {
   const getStatusText = (status: string) => {
     switch (status) {
       case "ready": return "Ready"
+      case "pending": return "Queued..."
       case "processing": return "Processing..."
-      case "error": return "No transcript"
+      case "error": return "Error"
       default: return status
     }
   }
@@ -420,34 +401,19 @@ export default function Home() {
                         setInputUrl(e.target.value)
                         setUrlError(null)
                       }}
-                      disabled={loading || !sessionId}
+                      disabled={!sessionId}
                       className={urlError ? "border-red-500" : ""}
                     />
                     {urlError && <p className="text-sm text-red-500 mt-1">{urlError}</p>}
                   </div>
                   <Button
                     onClick={handleAddVideo}
-                    disabled={loading || !inputUrl || !sessionId}
+                    disabled={!inputUrl || !sessionId}
                     className="w-full"
                     size="sm"
                   >
-                    {loading ? "Processing..." : "Add Video"}
+                    Add Video
                   </Button>
-
-                  {taskProgress && (
-                    <div className="p-2 border rounded bg-muted/50 text-sm">
-                      <div className="font-medium">{taskProgress.message}</div>
-                      {taskProgress.current_video && (
-                        <div className="text-xs text-muted-foreground truncate">{taskProgress.current_video}</div>
-                      )}
-                      <div className="w-full bg-gray-200 rounded-full h-1.5 mt-2">
-                        <div
-                          className="bg-primary h-1.5 rounded-full transition-all"
-                          style={{ width: `${taskProgress.progress || 0}%` }}
-                        />
-                      </div>
-                    </div>
-                  )}
                 </CardContent>
               </Card>
 
@@ -467,10 +433,31 @@ export default function Home() {
                               <div className="font-medium truncate" title={video.title}>{video.title}</div>
                               <div className="text-xs text-muted-foreground">{video.channel_title}</div>
                               <div className="text-xs mt-1">
-                                <span className={getStatusColor(video.status)}>{getStatusText(video.status)}</span>
-                                {video.transcript_source === "youtube" && <span className="text-green-600"> · Captions</span>}
-                                {video.transcript_source === "whisper" && <span className="text-blue-600"> · Whisper</span>}
+                                <span className={getStatusColor(video.status)}>
+                                  {video.status === "processing" && video.progress_message
+                                    ? video.progress_message
+                                    : getStatusText(video.status)}
+                                </span>
+                                {video.status === "ready" && video.transcript_source === "youtube" && (
+                                  <span className="text-green-600"> · Captions</span>
+                                )}
+                                {video.status === "ready" && video.transcript_source === "whisper" && (
+                                  <span className="text-blue-600"> · Whisper</span>
+                                )}
                               </div>
+                              {(video.status === "pending" || video.status === "processing") && (
+                                <div className="w-full bg-gray-200 rounded-full h-1 mt-1">
+                                  <div
+                                    className="bg-primary h-1 rounded-full transition-all"
+                                    style={{ width: `${video.progress}%` }}
+                                  />
+                                </div>
+                              )}
+                              {video.status === "error" && video.error_message && (
+                                <div className="text-xs text-red-500 mt-1 truncate" title={video.error_message}>
+                                  {video.error_message}
+                                </div>
+                              )}
                             </div>
                             <TooltipProvider delayDuration={200}>
                               <div className="flex items-center gap-1">

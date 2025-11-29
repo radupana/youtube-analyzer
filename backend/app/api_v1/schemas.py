@@ -45,24 +45,35 @@ class VideoList(BaseModel):
     total: int
 
 
+class SessionScopedVideo(BaseModel):
+    id: str
+    title: str
+    channel_id: str
+    channel_title: str
+    duration: str
+    published_at: datetime
+    transcript_source: str | None = None
+    status: str
+    progress: float = 0.0
+    progress_message: str | None = None
+    error_message: str | None = None
+
+
+class SessionScopedVideoList(BaseModel):
+    videos: list[SessionScopedVideo]
+    total: int
+
+
+class AddVideoResponse(BaseModel):
+    video_id: str
+    status: str
+    session_video_id: str | None = None
+    message: str | None = None
+
+
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=10000)
     session_id: str | None = None
-
-
-class TaskStatus(str, Enum):
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-
-class TaskResponse(BaseModel):
-    task_id: str
-    status: TaskStatus
-    progress: float = Field(0.0, ge=0.0, le=100.0)
-    result: dict | None = None
-    error: str | None = None
 
 
 class SessionCreate(BaseModel):

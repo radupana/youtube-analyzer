@@ -1,11 +1,11 @@
-from datetime import UTC, datetime
+from datetime import timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.db.database import get_session
-from app.db.models import Chunk, Video
+from app.db.models import Chunk, SessionVideo, Video, utc_now
 from app.main import app
 
 
@@ -78,8 +78,10 @@ def test_add_video(test_client):
     )
     assert response.status_code == 200
     data = response.json()
-    assert "task_id" in data
+    assert "video_id" in data
+    assert data["video_id"] == "dQw4w9WgXcQ"
     assert data["status"] == "pending"
+    assert "session_video_id" in data
 
 
 def test_add_video_missing_session_id(test_client):
@@ -132,6 +134,154 @@ def test_add_playlist_url_rejected(test_client):
     assert "single video URLs" in response.json()["detail"]
 
 
+def test_add_video_duplicate_while_processing(test_client):
+    client, _ = test_client
+    session_id = create_session(client)
+
+    response = client.post(
+        "/api/v1/videos/add",
+        json={
+            "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "session_id": session_id,
+        },
+    )
+    assert response.status_code == 200
+
+    response = client.post(
+        "/api/v1/videos/add",
+        json={
+            "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "session_id": session_id,
+        },
+    )
+    assert response.status_code == 409
+    assert "already being processed" in response.json()["detail"]
+
+
+def test_add_video_retry_after_error(test_client):
+    client, engine = test_client
+    session_id = create_session(client)
+
+    with Session(engine) as db:
+        sv = SessionVideo(
+            session_id=session_id,
+            video_id="dQw4w9WgXcQ",
+            status="error",
+            error_message="Previous error",
+        )
+        db.add(sv)
+        db.commit()
+
+    response = client.post(
+        "/api/v1/videos/add",
+        json={
+            "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "session_id": session_id,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "pending"
+
+
+def test_add_video_already_ready(test_client):
+    client, engine = test_client
+    session_id = create_session(client)
+
+    with Session(engine) as db:
+        sv = SessionVideo(
+            session_id=session_id,
+            video_id="dQw4w9WgXcQ",
+            status="ready",
+        )
+        db.add(sv)
+        db.commit()
+
+    response = client.post(
+        "/api/v1/videos/add",
+        json={
+            "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "session_id": session_id,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready"
+    assert response.json()["message"] == "Video already added"
+
+
+def test_session_video_has_progress_fields(test_client):
+    client, engine = test_client
+    session_id = create_session(client)
+
+    with Session(engine) as db:
+        video = Video(
+            id="test123",
+            title="Test Video",
+            channel_id="ch123",
+            channel_title="Test Channel",
+            duration="PT10M",
+            published_at=utc_now(),
+            transcript="Test transcript",
+            transcript_source="youtube",
+        )
+        db.add(video)
+        db.commit()
+
+        sv = SessionVideo(
+            session_id=session_id,
+            video_id="test123",
+            status="processing",
+            progress=50.0,
+            progress_message="Fetching transcript...",
+        )
+        db.add(sv)
+        db.commit()
+
+    response = client.get(f"/api/v1/videos/session/{session_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["videos"]) == 1
+    video = data["videos"][0]
+    assert video["status"] == "processing"
+    assert video["progress"] == 50.0
+    assert video["progress_message"] == "Fetching transcript..."
+
+
+def test_stale_processing_job_detected(test_client):
+    client, engine = test_client
+    session_id = create_session(client)
+
+    with Session(engine) as db:
+        video = Video(
+            id="stale123",
+            title="Stale Video",
+            channel_id="ch123",
+            channel_title="Test Channel",
+            duration="PT10M",
+            published_at=utc_now(),
+        )
+        db.add(video)
+        db.commit()
+
+        old_time = utc_now() - timedelta(minutes=20)
+        sv = SessionVideo(
+            session_id=session_id,
+            video_id="stale123",
+            status="processing",
+            progress=50.0,
+            updated_at=old_time,
+        )
+        db.add(sv)
+        db.commit()
+
+    response = client.get(f"/api/v1/videos/session/{session_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["videos"]) == 1
+    video = data["videos"][0]
+    assert video["status"] == "error"
+    assert "timed out" in video["error_message"].lower()
+
+
 def test_delete_video_not_found(test_client):
     client, _ = test_client
     response = client.delete("/api/v1/videos/nonexistent-video-id")
@@ -148,7 +298,7 @@ def test_get_transcript_success(test_client):
             channel_id="ch123",
             channel_title="Test Channel",
             duration="PT10M",
-            published_at=datetime.now(UTC),
+            published_at=utc_now(),
             transcript="Hello world. This is a test transcript.",
             transcript_source="youtube",
         )
@@ -206,7 +356,7 @@ def test_get_transcript_no_transcript(test_client):
             channel_id="ch123",
             channel_title="Test Channel",
             duration="PT10M",
-            published_at=datetime.now(UTC),
+            published_at=utc_now(),
             transcript=None,
             transcript_source=None,
         )
@@ -227,7 +377,7 @@ def test_get_transcript_no_timestamps(test_client):
             channel_id="ch123",
             channel_title="Test Channel",
             duration="PT10M",
-            published_at=datetime.now(UTC),
+            published_at=utc_now(),
             transcript="Whisper transcribed text.",
             transcript_source="whisper",
         )
@@ -250,3 +400,28 @@ def test_get_transcript_no_timestamps(test_client):
     assert response.status_code == 200
     data = response.json()
     assert data["has_timestamps"] is False
+
+
+def test_session_video_without_video_record(test_client):
+    client, engine = test_client
+    session_id = create_session(client)
+
+    with Session(engine) as db:
+        sv = SessionVideo(
+            session_id=session_id,
+            video_id="pending123",
+            status="pending",
+            progress=10.0,
+            progress_message="Queued...",
+        )
+        db.add(sv)
+        db.commit()
+
+    response = client.get(f"/api/v1/videos/session/{session_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["videos"]) == 1
+    video = data["videos"][0]
+    assert video["id"] == "pending123"
+    assert "Loading..." in video["title"]
+    assert video["status"] == "pending"

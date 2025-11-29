@@ -21,9 +21,14 @@ export interface SessionDetail {
 export interface Video {
   id: string
   title: string
+  channel_id: string
   channel_title: string
+  duration: string
+  published_at: string
   status: string
-  transcript?: string
+  progress: number
+  progress_message?: string
+  error_message?: string
   transcript_source?: string
 }
 
@@ -73,7 +78,7 @@ export async function fetchSessionVideos(sessionId: string): Promise<Video[]> {
   return data.videos
 }
 
-export async function addVideo(url: string, sessionId: string): Promise<{ task_id: string }> {
+export async function addVideo(url: string, sessionId: string): Promise<{ video_id: string; status: string }> {
   const response = await fetch(`${API_BASE}/videos/add`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -94,19 +99,6 @@ export async function removeVideo(sessionId: string, videoId: string): Promise<v
     method: "DELETE",
   })
   if (!response.ok) throw new Error("Failed to remove video")
-}
-
-export async function fetchTaskProgress(taskId: string): Promise<{
-  status: string
-  progress: number
-  message: string
-  current_video?: string
-  current_step?: string
-  elapsed_time?: number
-}> {
-  const response = await fetch(`${API_BASE}/videos/task/${taskId}`)
-  if (!response.ok) throw new Error("Failed to fetch task progress")
-  return response.json()
 }
 
 export async function sendChatMessageStream(
