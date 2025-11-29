@@ -1,5 +1,7 @@
 """Tests for YouTube service language functionality."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from app.services.youtube import (
@@ -233,3 +235,260 @@ class TestTranscriptResult:
         assert result.language_code is None
         assert result.is_generated is None
         assert result.available_languages is None
+
+
+class TestYouTubeServiceURLParsing:
+    @pytest.fixture
+    def service(self, monkeypatch):
+        monkeypatch.setenv("YOUTUBE_API_KEY", "test-key")
+        return YouTubeService()
+
+    def test_extract_video_id_standard_url(self, service):
+        url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        assert service.extract_video_id(url) == "dQw4w9WgXcQ"
+
+    def test_extract_video_id_short_url(self, service):
+        url = "https://youtu.be/dQw4w9WgXcQ"
+        assert service.extract_video_id(url) == "dQw4w9WgXcQ"
+
+    def test_extract_video_id_embed_url(self, service):
+        url = "https://www.youtube.com/embed/dQw4w9WgXcQ"
+        assert service.extract_video_id(url) == "dQw4w9WgXcQ"
+
+    def test_extract_video_id_invalid_url(self, service):
+        url = "https://example.com/video"
+        assert service.extract_video_id(url) is None
+
+    def test_is_channel_url_handle(self, service):
+        assert service.is_channel_url("https://youtube.com/@username") is True
+
+    def test_is_channel_url_channel_id(self, service):
+        assert service.is_channel_url("https://youtube.com/channel/UC123") is True
+
+    def test_is_channel_url_custom(self, service):
+        assert service.is_channel_url("https://youtube.com/c/customname") is True
+
+    def test_is_channel_url_user(self, service):
+        assert service.is_channel_url("https://youtube.com/user/username") is True
+
+    def test_is_channel_url_video(self, service):
+        assert service.is_channel_url("https://youtube.com/watch?v=abc123") is False
+
+    def test_is_playlist_url_true(self, service):
+        assert (
+            service.is_playlist_url("https://youtube.com/playlist?list=PL123") is True
+        )
+        assert service.is_playlist_url("https://youtube.com/?list=PL123") is True
+
+    def test_is_playlist_url_video_in_playlist(self, service):
+        # Video in playlist is allowed (we extract the video)
+        assert (
+            service.is_playlist_url("https://youtube.com/watch?v=abc&list=PL123")
+            is False
+        )
+
+    def test_is_playlist_url_regular_video(self, service):
+        assert service.is_playlist_url("https://youtube.com/watch?v=abc123") is False
+
+
+class TestYouTubeServiceGetVideoInfo:
+    @pytest.fixture
+    def service(self, monkeypatch):
+        monkeypatch.setenv("YOUTUBE_API_KEY", "test-key")
+        return YouTubeService()
+
+    def test_get_video_info_success(self, service):
+        mock_response = {
+            "items": [
+                {
+                    "snippet": {
+                        "title": "Test Video",
+                        "channelId": "UC123",
+                        "channelTitle": "Test Channel",
+                        "description": "A test video",
+                        "publishedAt": "2024-01-15T10:00:00Z",
+                    },
+                    "contentDetails": {"duration": "PT10M30S"},
+                    "statistics": {"viewCount": "1000", "likeCount": "100"},
+                }
+            ]
+        }
+
+        mock_videos = MagicMock()
+        mock_videos.list.return_value.execute.return_value = mock_response
+        service.youtube.videos = MagicMock(return_value=mock_videos)
+
+        result = service.get_video_info("test123")
+
+        assert result is not None
+        assert result["title"] == "Test Video"
+        assert result["channel_id"] == "UC123"
+        assert result["view_count"] == 1000
+
+    def test_get_video_info_not_found(self, service):
+        mock_response = {"items": []}
+
+        mock_videos = MagicMock()
+        mock_videos.list.return_value.execute.return_value = mock_response
+        service.youtube.videos = MagicMock(return_value=mock_videos)
+
+        result = service.get_video_info("nonexistent")
+
+        assert result is None
+
+    def test_get_video_info_api_error(self, service):
+        mock_videos = MagicMock()
+        mock_videos.list.return_value.execute.side_effect = Exception("API Error")
+        service.youtube.videos = MagicMock(return_value=mock_videos)
+
+        result = service.get_video_info("test123")
+
+        assert result is None
+
+
+class TestYouTubeServiceGetAvailableLanguages:
+    @pytest.fixture
+    def service(self, monkeypatch):
+        monkeypatch.setenv("YOUTUBE_API_KEY", "test-key")
+        return YouTubeService()
+
+    def test_get_available_languages_success(self, service):
+        mock_transcripts = [
+            MockTranscript("en", "English", is_generated=False),
+            MockTranscript("de", "German", is_generated=True),
+        ]
+
+        with patch("app.services.youtube.YouTubeTranscriptApi") as mock_api:
+            mock_api.return_value.list.return_value = mock_transcripts
+            result = service.get_available_languages("test123")
+
+        assert len(result) == 2
+        assert result[0].code == "en"
+        assert result[1].code == "de"
+
+    def test_get_available_languages_error(self, service):
+        with patch("app.services.youtube.YouTubeTranscriptApi") as mock_api:
+            mock_api.return_value.list.side_effect = Exception("API Error")
+            result = service.get_available_languages("test123")
+
+        assert result == []
+
+
+class TestYouTubeServiceGetTranscript:
+    @pytest.fixture
+    def service(self, monkeypatch):
+        monkeypatch.setenv("YOUTUBE_API_KEY", "test-key")
+        return YouTubeService()
+
+    def test_get_transcript_force_whisper(self, service):
+        with patch("app.services.whisper.get_whisper_transcript") as mock_whisper:
+            mock_whisper.return_value = ("Transcribed text", "en")
+            result = service.get_transcript("test123", force_whisper=True)
+
+        assert result is not None
+        assert result.text == "Transcribed text"
+        assert result.source == "whisper"
+        assert result.language_code == "en"
+
+    def test_get_transcript_force_whisper_failure(self, service):
+        with patch("app.services.whisper.get_whisper_transcript") as mock_whisper:
+            mock_whisper.return_value = None
+            result = service.get_transcript("test123", force_whisper=True)
+
+        assert result is None
+
+    def test_get_transcript_force_whisper_exception(self, service):
+        with patch("app.services.whisper.get_whisper_transcript") as mock_whisper:
+            mock_whisper.side_effect = Exception("Whisper error")
+            result = service.get_transcript("test123", force_whisper=True)
+
+        assert result is None
+
+    def test_get_transcript_youtube_success(self, service):
+        """Test successful transcript fetch from YouTube."""
+
+        class MockFetchedEntry:
+            def __init__(self, text, start, duration):
+                self.text = text
+                self.start = start
+                self.duration = duration
+
+        class MockFetchedTranscript:
+            def __init__(self):
+                self.language = "English"
+                self.language_code = "en"
+                self.is_generated = False
+                self.is_translatable = True
+
+            def fetch(self):
+                return [
+                    MockFetchedEntry("Hello", 0.0, 1.0),
+                    MockFetchedEntry("world", 1.0, 1.0),
+                ]
+
+        mock_transcript_list = [MockFetchedTranscript()]
+
+        with patch("app.services.youtube.YouTubeTranscriptApi") as mock_api:
+            mock_api.return_value.list.return_value = mock_transcript_list
+            result = service.get_transcript(
+                "test123",
+                preferred_languages=["en"],
+                prefer_manual=True,
+            )
+
+        assert result is not None
+        assert result.text == "Hello world"
+        assert result.source == "youtube"
+        assert result.language == "English"
+        assert result.language_code == "en"
+
+    def test_get_transcript_whisper_fallback(self, service):
+        """Test fallback to Whisper when YouTube has no transcripts."""
+        from youtube_transcript_api import NoTranscriptFound
+
+        with patch("app.services.youtube.YouTubeTranscriptApi") as mock_api:
+            mock_api.return_value.list.side_effect = NoTranscriptFound(
+                "test", ["en"], {}
+            )
+
+            with patch("app.services.whisper.get_whisper_transcript") as mock_whisper:
+                mock_whisper.return_value = ("Fallback text", "en")
+                result = service.get_transcript(
+                    "test123",
+                    use_whisper_fallback=True,
+                )
+
+        assert result is not None
+        assert result.text == "Fallback text"
+        assert result.source == "whisper"
+
+    def test_get_transcript_whisper_fallback_also_fails(self, service):
+        """Test when both YouTube and Whisper fail."""
+        from youtube_transcript_api import TranscriptsDisabled
+
+        with patch("app.services.youtube.YouTubeTranscriptApi") as mock_api:
+            mock_api.return_value.list.side_effect = TranscriptsDisabled("test")
+
+            with patch("app.services.whisper.get_whisper_transcript") as mock_whisper:
+                mock_whisper.return_value = None
+                result = service.get_transcript(
+                    "test123",
+                    use_whisper_fallback=True,
+                )
+
+        assert result is None
+
+    def test_get_transcript_no_fallback(self, service):
+        """Test when YouTube fails and fallback is disabled."""
+        from youtube_transcript_api import NoTranscriptFound
+
+        with patch("app.services.youtube.YouTubeTranscriptApi") as mock_api:
+            mock_api.return_value.list.side_effect = NoTranscriptFound(
+                "test", ["en"], {}
+            )
+            result = service.get_transcript(
+                "test123",
+                use_whisper_fallback=False,
+            )
+
+        assert result is None

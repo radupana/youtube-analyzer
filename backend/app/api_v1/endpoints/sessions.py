@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel import Session, delete, func, select
+from sqlmodel import Session, col, delete, func, select
 
 from app.api_v1.schemas import (
     MessageResponse,
@@ -178,16 +178,16 @@ def delete_session(session_id: str, db: Session = Depends(get_session)):
             continue
 
         # Bulk delete all related data
-        db.exec(delete(SessionVideo).where(SessionVideo.video_id == video_id))
-        db.exec(delete(Chunk).where(Chunk.video_id == video_id))
-        db.exec(delete(PatternResult).where(PatternResult.video_id == video_id))
+        db.exec(delete(SessionVideo).where(col(SessionVideo.video_id) == video_id))
+        db.exec(delete(Chunk).where(col(Chunk.video_id) == video_id))
+        db.exec(delete(PatternResult).where(col(PatternResult.video_id) == video_id))
 
         # Delete the video
         db.delete(video)
         videos_deleted += 1
 
     # Bulk delete messages for this session
-    db.exec(delete(Message).where(Message.session_id == session_id))
+    db.exec(delete(Message).where(col(Message.session_id) == session_id))
 
     # Delete the session itself
     db.delete(session)

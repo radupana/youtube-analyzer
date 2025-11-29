@@ -9,7 +9,7 @@ from enum import Enum
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, delete, select
+from sqlmodel import Session, col, delete, select
 
 from app.api_v1.schemas import (
     AddVideoResponse,
@@ -440,9 +440,9 @@ async def remove_video_from_session(
     sessions_affected = len(all_session_videos)
 
     # Bulk delete all related data
-    db.exec(delete(SessionVideo).where(SessionVideo.video_id == video_id))
-    db.exec(delete(Chunk).where(Chunk.video_id == video_id))
-    db.exec(delete(PatternResult).where(PatternResult.video_id == video_id))
+    db.exec(delete(SessionVideo).where(col(SessionVideo.video_id) == video_id))
+    db.exec(delete(Chunk).where(col(Chunk.video_id) == video_id))
+    db.exec(delete(PatternResult).where(col(PatternResult.video_id) == video_id))
 
     # Delete the video itself
     db.delete(video)
@@ -588,9 +588,9 @@ async def delete_video(video_id: str, db: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="Video not found")
 
     # Bulk delete all related data
-    db.exec(delete(SessionVideo).where(SessionVideo.video_id == video_id))
-    db.exec(delete(Chunk).where(Chunk.video_id == video_id))
-    db.exec(delete(PatternResult).where(PatternResult.video_id == video_id))
+    db.exec(delete(SessionVideo).where(col(SessionVideo.video_id) == video_id))
+    db.exec(delete(Chunk).where(col(Chunk.video_id) == video_id))
+    db.exec(delete(PatternResult).where(col(PatternResult.video_id) == video_id))
 
     db.delete(video)
     db.commit()

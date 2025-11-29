@@ -113,6 +113,40 @@ class TestGetAvailableTranscripts:
         assert response.status_code == 404
         assert "No transcripts available" in response.json()["detail"]
 
+    def test_handles_invalid_json_cache(self, test_client):
+        """Test that invalid JSON in cache falls through to API."""
+        client, engine = test_client
+        with Session(engine) as db:
+            video = Video(
+                id="badjson123",
+                title="Test Video",
+                channel_id="ch1",
+                channel_title="Test Channel",
+                duration="PT10M",
+                published_at=datetime.now(UTC),
+                transcript="Some transcript",
+                transcript_source="youtube",
+                available_languages_json="not valid json{{{",
+            )
+            db.add(video)
+            db.commit()
+
+        mock_languages = [
+            LanguageInfo(
+                code="en", name="English", is_generated=True, is_translatable=True
+            ),
+        ]
+        with patch("app.api_v1.endpoints.languages.youtube_service") as mock_svc:
+            mock_svc.get_available_languages.return_value = mock_languages
+            response = client.get(
+                "/api/v1/languages/videos/badjson123/available-transcripts"
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["cached"] is False  # Falls through to API
+        assert len(data["languages"]) == 1
+
     def test_whisper_available_flag_set(self, test_client):
         client, engine = test_client
         cached_languages = [
