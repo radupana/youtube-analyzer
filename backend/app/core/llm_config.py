@@ -34,17 +34,29 @@ class TranscriptConfig:
     prefer_manual: bool = True
 
 
+@dataclass
+class ProxyConfig:
+    # For generic HTTP proxy (e.g., Webshare free with IP auth)
+    host: str | None = None
+    port: int | None = None
+    # For Webshare rotating residential (credentials from env)
+    type: str | None = None  # "webshare_rotating"
+    username: str | None = None  # from WEBSHARE_PROXY_USERNAME
+    password: str | None = None  # from WEBSHARE_PROXY_PASSWORD
+
+
 _providers: dict[str, LLMProvider] = {}
 _current_provider_id: str | None = None
 _default_provider_id: str | None = None
 _whisper_config: WhisperConfig = WhisperConfig()
 _rag_config: RagConfig = RagConfig()
 _transcript_config: TranscriptConfig = TranscriptConfig()
+_proxy_config: ProxyConfig = ProxyConfig()
 
 
 def load_config(config_path: str | Path = "config.yaml") -> None:
     global _providers, _current_provider_id, _default_provider_id
-    global _whisper_config, _rag_config, _transcript_config
+    global _whisper_config, _rag_config, _transcript_config, _proxy_config
 
     path = Path(config_path)
     if not path.exists():
@@ -101,6 +113,15 @@ def load_config(config_path: str | Path = "config.yaml") -> None:
         prefer_manual=transcript_cfg.get("prefer_manual", True),
     )
 
+    proxy_cfg = config.get("proxy", {})
+    _proxy_config = ProxyConfig(
+        host=proxy_cfg.get("host"),
+        port=proxy_cfg.get("port"),
+        type=proxy_cfg.get("type"),
+        username=os.environ.get("WEBSHARE_PROXY_USERNAME"),
+        password=os.environ.get("WEBSHARE_PROXY_PASSWORD"),
+    )
+
 
 def get_providers() -> list[LLMProvider]:
     return list(_providers.values())
@@ -134,3 +155,7 @@ def get_rag_config() -> RagConfig:
 
 def get_transcript_config() -> TranscriptConfig:
     return _transcript_config
+
+
+def get_proxy_config() -> ProxyConfig:
+    return _proxy_config
