@@ -34,17 +34,17 @@ Then chat with AI about the content. Add more videos to build context across mul
 
 ## Features
 
-| Feature | Description |
-|---------|-------------|
-| **Pattern Analysis** | One-click structured extraction (summaries, tutorial notes) |
-| **Multi-Video Chat** | Ask questions across multiple videos simultaneously |
-| **RAG-Powered** | Semantic search finds relevant transcript sections automatically |
-| **Transcript Search** | Find specific moments with keyword highlighting |
-| **Export Transcripts** | Download as TXT, SRT, or JSON |
-| **Language Preferences** | Set preferred caption languages (drag to reorder priority) |
-| **Streaming Responses** | See AI responses appear in real-time |
-| **Whisper Fallback** | Auto-transcribe videos without captions |
-| **Session Management** | Organize videos into separate analysis sessions |
+| Feature                  | Description                                                      |
+|--------------------------|------------------------------------------------------------------|
+| **Pattern Analysis**     | One-click structured extraction (summaries, tutorial notes)      |
+| **Multi-Video Chat**     | Ask questions across multiple videos simultaneously              |
+| **RAG-Powered**          | Semantic search finds relevant transcript sections automatically |
+| **Transcript Search**    | Find specific moments with keyword highlighting                  |
+| **Export Transcripts**   | Download as TXT, SRT, or JSON                                    |
+| **Language Preferences** | Set preferred caption languages (drag to reorder priority)       |
+| **Streaming Responses**  | See AI responses appear in real-time                             |
+| **Whisper Fallback**     | Auto-transcribe videos without captions                          |
+| **Session Management**   | Organize videos into separate analysis sessions                  |
 
 ## Requirements
 
@@ -100,8 +100,62 @@ Everything is cached locally in an SQLite database for fast repeat access.
 
 ## Troubleshooting
 
-**"Could not retrieve a transcript for the video"**
-Your YouTube API key is likely rate-limited. Wait a few minutes or check [quota usage](https://console.cloud.google.com/apis/api/youtube.googleapis.com/quotas).
+### YouTube IP Blocking
+
+**"Could not retrieve a transcript"** / **"YouTube is blocking requests from your IP"**
+
+YouTube aggressively blocks automated transcript requests. This is a YouTube limitation, not a tool bug. Common causes:
+
+- **Too many requests** - YouTube rate-limits IPs that fetch many transcripts
+- **Cloud/VPN IPs** - Most cloud providers and popular VPNs are pre-blocked
+- **Datacenter IPs** - Residential IPs work better than datacenter IPs
+
+**Workarounds (in order of reliability):**
+
+| Solution              | Effort | Notes                                                               |
+|-----------------------|--------|---------------------------------------------------------------------|
+| **Wait 24-48h**       | None   | IP blocks often expire after a day or two                           |
+| **Whisper fallback**  | None   | Enable in config - transcribes audio directly (slower but reliable) |
+| **Different network** | Low    | Mobile hotspot, different WiFi, etc.                                |
+| **Residential proxy** | Medium | Rotating residential IPs bypass YouTube's blocking (see below)      |
+
+#### Whisper Fallback
+
+To enable Whisper fallback (recommended), ensure your `config.yaml` has:
+
+```yaml
+whisper:
+  fallback_enabled: true
+  model: base  # or 'tiny' for faster, 'small' for better quality
+```
+
+#### Proxy Setup (Recommended)
+
+For reliable transcript fetching, use a rotating residential proxy. YouTube actively blocks datacenter IPs (including the free Webshare proxies), so **rotating residential is the only reliable option**.
+
+**Webshare Rotating Residential (~$4/month for 1GB ≈ 6,000+ videos)**
+
+1. Sign up at [webshare.io](https://www.webshare.io/)
+2. Purchase a **Rotating Residential** plan (1GB is plenty for normal use)
+3. Go to **Rotating Residential** → **Proxy List**, select **"Rotating Proxy Endpoint"** as connection method
+4. Copy your **username** (e.g., `username-rotate`) and **password**
+5. Add to `config.yaml`:
+   ```yaml
+   proxy:
+     type: webshare_rotating
+   ```
+6. Add credentials to `.env`:
+   ```env
+   WEBSHARE_PROXY_USERNAME=your_username-rotate
+   WEBSHARE_PROXY_PASSWORD=your_password
+   ```
+7. Restart: `docker-compose restart backend`
+
+The backend logs will show `Using Webshare rotating residential proxy` when configured.
+
+> **Note:** Webshare's free tier provides datacenter proxies which YouTube typically blocks. The paid rotating residential proxies (~$4 for 1GB) are much more reliable as they use real home IP addresses from an 80M+ IP pool.
+
+### Other Issues
 
 **Whisper transcription is slow**
 Use a smaller model in `config.yaml`: `model: tiny` (fastest) or `model: small` (balanced).

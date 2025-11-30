@@ -30,3 +30,15 @@ rag:
 transcripts:
   preferred_languages: ["en", "de", "fr", "es", "pt", "it", "nl", "pl", "ja", "ko", "zh"]
   prefer_manual: true
+
+# Proxy for YouTube transcript fetching (optional)
+# YouTube aggressively blocks automated requests - a residential proxy helps avoid this
+# See README.md for setup instructions
+# proxy:
+#   # Option 1: Generic HTTP proxy (e.g., Webshare free tier with IP authorization)
+#   # Note: Free datacenter proxies are usually blocked by YouTube
+#   # host: "1.2.3.4"
+#   # port: 7030
+#   #
+#   # Option 2: Webshare rotating residential (recommended) - set credentials in .env
+#   type: webshare_rotating

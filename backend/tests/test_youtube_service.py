@@ -4,12 +4,21 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import app.services.youtube as youtube_module
 from app.services.youtube import (
     LanguageInfo,
     TranscriptResult,
     YouTubeService,
     validate_language_codes,
 )
+
+
+@pytest.fixture(autouse=True)
+def reset_transcript_api_cache():
+    """Reset the cached transcript API instance before each test."""
+    youtube_module._transcript_api = None
+    yield
+    youtube_module._transcript_api = None
 
 
 class TestValidateLanguageCodes:

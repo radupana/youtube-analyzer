@@ -7,14 +7,98 @@ from datetime import datetime
 from typing import Any
 
 from googleapiclient.discovery import build
+from requests import Session
 from youtube_transcript_api import YouTubeTranscriptApi
-from youtube_transcript_api._errors import NoTranscriptFound, TranscriptsDisabled
+from youtube_transcript_api._errors import (
+    NoTranscriptFound,
+    TranscriptsDisabled,
+    YouTubeDataUnparsable,
+)
+from youtube_transcript_api.proxies import GenericProxyConfig, WebshareProxyConfig
 
 from app.core.config import get_settings
-from app.core.llm_config import get_transcript_config, get_whisper_config
+from app.core.llm_config import (
+    get_proxy_config,
+    get_transcript_config,
+    get_whisper_config,
+)
 from app.services.chunking import TranscriptSegment
 
 logger = logging.getLogger(__name__)
+
+
+def _create_browser_session() -> Session:
+    """Create a requests session with browser-like headers.
+
+    YouTube's Innertube API fingerprints requests based on headers.
+    Using realistic browser headers reduces the chance of being blocked.
+    """
+    session = Session()
+    session.headers.update(
+        {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/131.0.0.0 Safari/537.36"
+            ),
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Encoding": "gzip, deflate, br",
+            "DNT": "1",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Cache-Control": "max-age=0",
+        }
+    )
+    return session
+
+
+# Cached transcript API instance
+_transcript_api: YouTubeTranscriptApi | None = None
+
+
+def _get_transcript_api() -> YouTubeTranscriptApi:
+    """Get a YouTubeTranscriptApi instance, using Webshare proxy if configured."""
+    global _transcript_api
+    if _transcript_api is not None:
+        return _transcript_api
+
+    proxy_cfg = get_proxy_config()
+
+    # Priority 1: Webshare rotating residential proxy (paid, most reliable)
+    if (
+        proxy_cfg.type == "webshare_rotating"
+        and proxy_cfg.username
+        and proxy_cfg.password
+    ):
+        logger.info("Using Webshare rotating residential proxy for YouTube transcripts")
+        _transcript_api = YouTubeTranscriptApi(
+            proxy_config=WebshareProxyConfig(
+                proxy_username=proxy_cfg.username,
+                proxy_password=proxy_cfg.password,
+            )
+        )
+    # Priority 2: Generic HTTP proxy (e.g., Webshare free with IP auth)
+    elif proxy_cfg.host and proxy_cfg.port:
+        proxy_url = f"http://{proxy_cfg.host}:{proxy_cfg.port}"
+        logger.info(f"Using generic proxy for YouTube transcripts: {proxy_url}")
+        _transcript_api = YouTubeTranscriptApi(
+            proxy_config=GenericProxyConfig(
+                http_url=proxy_url,
+                https_url=proxy_url,
+            )
+        )
+    else:
+        # Fall back to browser-like session without proxy
+        session = _create_browser_session()
+        _transcript_api = YouTubeTranscriptApi(http_client=session)
+
+    return _transcript_api
+
 
 VALID_LANGUAGE_CODES = {
     "en",
@@ -254,7 +338,7 @@ class YouTubeService:
     def get_available_languages(self, video_id: str) -> list[LanguageInfo]:
         """Get list of available transcript languages for a video."""
         try:
-            ytt_api = YouTubeTranscriptApi()
+            ytt_api = _get_transcript_api()
             transcript_list = ytt_api.list(video_id)
 
             return [
@@ -325,7 +409,7 @@ class YouTubeService:
             logger.info(
                 f"Fetching transcript for {video_id}, languages={preferred_languages}"
             )
-            ytt_api = YouTubeTranscriptApi()
+            ytt_api = _get_transcript_api()
             transcript_list = ytt_api.list(video_id)
 
             transcript, available_languages = self._select_best_transcript(
@@ -364,8 +448,17 @@ class YouTubeService:
             logger.warning(f"Transcripts disabled for {video_id}")
         except NoTranscriptFound:
             logger.warning(f"No transcripts found for {video_id}")
+        except YouTubeDataUnparsable as e:
+            # This often means YouTube changed their response format or is blocking
+            logger.error(
+                f"YouTube response unparsable for {video_id} - "
+                f"may indicate API changes or soft blocking: {e}"
+            )
         except Exception as e:
-            logger.error(f"Error fetching transcript for {video_id}: {e}")
+            # Log the full exception type for debugging
+            logger.error(
+                f"Error fetching transcript for {video_id} ({type(e).__name__}): {e}"
+            )
 
         if use_whisper_fallback is None:
             use_whisper_fallback = get_whisper_config().fallback_enabled
