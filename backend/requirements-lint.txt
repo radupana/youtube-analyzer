@@ -19,3 +19,4 @@ psutil>=5.9.0
 ruff>=0.8.0
 mypy>=1.13.0
 types-PyYAML
+types-requests
