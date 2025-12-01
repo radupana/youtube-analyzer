@@ -33,7 +33,7 @@
     "@types/react-dom": "^19",
     "autoprefixer": "^10.4.20",
     "eslint": "^9",
-    "eslint-config-next": "16.0.5",
+    "eslint-config-next": "16.0.6",
     "postcss": "^8",
     "tailwindcss": "^4.1.17",
     "typescript": "^5"
